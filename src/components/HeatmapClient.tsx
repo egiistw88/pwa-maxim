@@ -51,10 +51,7 @@ export function HeatmapClient() {
     type: "FeatureCollection",
     features: []
   });
-  const [poiGeoJson, setPoiGeoJson] = useState<GeoJsonFeatureCollection>({
-    type: "FeatureCollection",
-    features: []
-  });
+  const [poiGeoJson, setPoiGeoJson] = useState<GeoJsonFeatureCollection | null>(null);
   const [weather, setWeather] = useState<WeatherSummary | null>(null);
   const [internalEnabled, setInternalEnabled] = useState(true);
   const [poiEnabled, setPoiEnabled] = useState(true);
@@ -123,8 +120,19 @@ export function HeatmapClient() {
           return data;
         }));
 
+      if (!poiEnabled) {
+        setPoiGeoJson(null);
+        return;
+      }
+
+      const points = poiData?.points ?? [];
+      if (points.length === 0) {
+        setPoiGeoJson(null);
+        return;
+      }
+
       const poiCells = binPointsToCells(
-        poiData.points.map((point) => ({ lat: point.lat, lon: point.lon })),
+        points.map((point) => ({ lat: point.lat, lon: point.lon })),
         CELL_SIZE_METERS
       );
       setPoiGeoJson(cellsToFeatureCollection(poiCells, CELL_SIZE_METERS, center[0]));
@@ -212,6 +220,11 @@ export function HeatmapClient() {
     } as const;
   }, [weather, rainEnabled]);
 
+  const emptyCollection: GeoJsonFeatureCollection = {
+    type: "FeatureCollection",
+    features: []
+  };
+
   const layers = useMemo(
     () => [
       {
@@ -227,8 +240,8 @@ export function HeatmapClient() {
       },
       {
         id: "poi",
-        data: poiGeoJson,
-        visible: poiEnabled,
+        data: poiGeoJson ?? emptyCollection,
+        visible: poiEnabled && Boolean(poiGeoJson),
         style: (feature: any) => ({
           color: "#16a34a",
           weight: 1,
