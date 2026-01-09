@@ -1,7 +1,8 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { type GeoJsonFeatureCollection } from "../lib/types";
+import { loadLeaflet, type LeafletNS } from "../lib/leafletLoader";
 
 export type LeafletMapHandle = {
   fitBounds: (bounds: [[number, number], [number, number]]) => void;
@@ -21,59 +22,32 @@ type LeafletMapProps = {
   layers: GeoJsonLayer[];
 };
 
-const leafletCss = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-const leafletJs = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-
-function loadLeaflet() {
-  return new Promise<any>((resolve, reject) => {
-    if (typeof window === "undefined") {
-      reject(new Error("Leaflet hanya bisa di client"));
-      return;
-    }
-
-    if (window.L) {
-      resolve(window.L);
-      return;
-    }
-
-    if (!document.querySelector(`link[href="${leafletCss}"]`)) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = leafletCss;
-      document.head.appendChild(link);
-    }
-
-    const script = document.createElement("script");
-    script.src = leafletJs;
-    script.async = true;
-    script.onload = () => resolve(window.L);
-    script.onerror = () => reject(new Error("Gagal memuat Leaflet"));
-    document.body.appendChild(script);
-  });
-}
-
 export const LeafletMap = forwardRef<LeafletMapHandle, LeafletMapProps>(
   ({ center, zoom, layers }, ref) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const mapRef = useRef<any>(null);
-    const leafletRef = useRef<any>(null);
-    const [ready, setReady] = useState(false);
-    const geoLayersRef = useRef<Record<string, any>>({});
+    const layersRef = useRef<Record<string, any>>({});
+    const leafletRef = useRef<LeafletNS | null>(null);
 
     useImperativeHandle(ref, () => ({
       fitBounds: (bounds) => {
-        mapRef.current?.fitBounds(bounds);
+        mapRef.current?.fitBounds(bounds as any);
       },
       setView: (nextCenter, nextZoom) => {
-        mapRef.current?.setView(nextCenter, nextZoom ?? mapRef.current.getZoom());
+        const map = mapRef.current;
+        if (!map) {
+          return;
+        }
+        map.setView(nextCenter as any, nextZoom ?? map.getZoom() ?? 12);
       }
     }));
 
     useEffect(() => {
-      let isMounted = true;
+      let cancelled = false;
+
       loadLeaflet()
         .then((leaflet) => {
-          if (!isMounted || !containerRef.current) {
+          if (cancelled || mapRef.current || !containerRef.current) {
             return;
           }
           leafletRef.current = leaflet;
@@ -84,40 +58,48 @@ export const LeafletMap = forwardRef<LeafletMapHandle, LeafletMapProps>(
             })
             .addTo(map);
           mapRef.current = map;
-          setReady(true);
         })
         .catch(() => {
-          setReady(false);
+          // ignore load errors
         });
 
       return () => {
-        isMounted = false;
+        cancelled = true;
         if (mapRef.current) {
           mapRef.current.remove();
           mapRef.current = null;
         }
       };
-    }, [center, zoom]);
+    }, []);
 
     useEffect(() => {
-      if (!ready || !mapRef.current || !leafletRef.current) {
+      if (!mapRef.current || !leafletRef.current) {
         return;
       }
 
+      mapRef.current.setView(center as any, zoom);
+    }, [center, zoom]);
+
+    useEffect(() => {
+      const map = mapRef.current;
       const leaflet = leafletRef.current;
+      if (!map || !leaflet) {
+        return;
+      }
+
       const nextIds = new Set(layers.map((layer) => layer.id));
-      Object.keys(geoLayersRef.current).forEach((id) => {
+      Object.keys(layersRef.current).forEach((id) => {
         if (!nextIds.has(id)) {
-          mapRef.current?.removeLayer(geoLayersRef.current[id]);
-          delete geoLayersRef.current[id];
+          map.removeLayer(layersRef.current[id]);
+          delete layersRef.current[id];
         }
       });
 
       layers.forEach((layer) => {
-        const existing = geoLayersRef.current[layer.id];
+        const existing = layersRef.current[layer.id];
         if (existing) {
-          mapRef.current?.removeLayer(existing);
-          delete geoLayersRef.current[layer.id];
+          map.removeLayer(existing);
+          delete layersRef.current[layer.id];
         }
         if (!layer.visible) {
           return;
@@ -125,10 +107,10 @@ export const LeafletMap = forwardRef<LeafletMapHandle, LeafletMapProps>(
         const geoLayer = leaflet.geoJSON(layer.data, {
           style: layer.style
         });
-        geoLayer.addTo(mapRef.current!);
-        geoLayersRef.current[layer.id] = geoLayer;
+        geoLayer.addTo(map);
+        layersRef.current[layer.id] = geoLayer;
       });
-    }, [layers, ready]);
+    }, [layers]);
 
     return <div className="map-wrapper" ref={containerRef} />;
   }
