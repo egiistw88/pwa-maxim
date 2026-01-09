@@ -3,7 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { type GeoJsonFeatureCollection } from "../lib/types";
 
-type LeafletMapHandle = {
+export type LeafletMapHandle = {
   fitBounds: (bounds: [[number, number], [number, number]]) => void;
   setView: (center: [number, number], zoom?: number) => void;
 };

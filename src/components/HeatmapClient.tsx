@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LeafletMap } from "./LeafletMap";
+import { LeafletMap, type LeafletMapHandle } from "./LeafletMap";
 import {
   addTrip,
   createId,
@@ -59,9 +59,7 @@ export function HeatmapClient() {
   const [status, setStatus] = useState<string | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
 
-  const mapRef = useRef<{ fitBounds: (bounds: [[number, number], [number, number]]) => void }>(
-    null
-  );
+  const mapRef = useRef<LeafletMapHandle>(null);
 
   const region = regions[regionKey];
   const center = useMemo(() => {
