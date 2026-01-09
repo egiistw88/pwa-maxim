@@ -1,3 +1,5 @@
+import { type GeoJsonFeatureCollection, type GeoJsonPolygon } from "./types";
+
 export type PointInput = {
   lat: number;
   lon: number;
@@ -27,7 +29,7 @@ export function cellKeyToPolygon(
   key: string,
   cellSizeMeters: number,
   referenceLat: number
-) {
+): GeoJsonPolygon {
   const [iStr, jStr] = key.split(":");
   const i = Number(iStr);
   const j = Number(jStr);
@@ -39,7 +41,7 @@ export function cellKeyToPolygon(
   const maxLon = minLon + degLon;
 
   return {
-    type: "Polygon",
+    type: "Polygon" as const,
     coordinates: [
       [
         [minLon, minLat],
@@ -75,12 +77,12 @@ export function cellsToFeatureCollection(
   cells: CellAggregate[],
   cellSizeMeters: number,
   referenceLat: number
-) {
+): GeoJsonFeatureCollection {
   const maxValue = cells.reduce((acc, cell) => Math.max(acc, cell.value), 0);
   return {
-    type: "FeatureCollection",
+    type: "FeatureCollection" as const,
     features: cells.map((cell) => ({
-      type: "Feature",
+      type: "Feature" as const,
       geometry: cellKeyToPolygon(cell.key, cellSizeMeters, referenceLat),
       properties: {
         value: cell.value,

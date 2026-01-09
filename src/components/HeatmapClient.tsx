@@ -11,11 +11,7 @@ import {
   type Trip
 } from "../lib/data";
 import { binPointsToCells, binTripsToCells, cellsToFeatureCollection } from "../lib/grid";
-
-type GeoJsonFeatureCollection = {
-  type: "FeatureCollection";
-  features: Array<any>;
-};
+import { type GeoJsonFeatureCollection } from "../lib/types";
 
 type WeatherSummary = {
   hourly: Array<{ time: string; precipitationProbability: number }>;
