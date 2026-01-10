@@ -67,8 +67,12 @@ function formatDurationSince(iso: string, now: number) {
   return `${hours}j ${minutes.toString().padStart(2, "0")}m`;
 }
 
-function isValidCoord(value: number | null | undefined) {
+function isValidCoord(value: number | null | undefined): value is number {
   return Number.isFinite(value);
+}
+
+function toNumberOrNaN(value: number | null | undefined) {
+  return isValidCoord(value) ? value : Number.NaN;
 }
 
 export function DriveModeClient() {
@@ -317,10 +321,10 @@ export function DriveModeClient() {
       id: nanoid(),
       startedAt: draft.startedAt,
       endedAt,
-      startLat: isValidCoord(draft.startLat) ? draft.startLat : Number.NaN,
-      startLon: isValidCoord(draft.startLon) ? draft.startLon : Number.NaN,
-      endLat: isValidCoord(endPosition?.lat) ? endPosition?.lat : Number.NaN,
-      endLon: isValidCoord(endPosition?.lon) ? endPosition?.lon : Number.NaN,
+      startLat: toNumberOrNaN(draft.startLat),
+      startLon: toNumberOrNaN(draft.startLon),
+      endLat: toNumberOrNaN(endPosition?.lat),
+      endLon: toNumberOrNaN(endPosition?.lon),
       earnings: earningsValue,
       note: note || undefined,
       source: "assistant"
