@@ -4,10 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { db, type Session, type Trip, type WalletTx } from "../lib/db";
 import { haversineKm } from "../lib/geo";
 import { computeActiveMinutes } from "../lib/session";
+import { useLiveQueryState } from "../lib/useLiveQueryState";
 
 const formatCurrency = (value: number) => `Rp ${value.toLocaleString("id-ID")}`;
 
-function isValidCoord(value: number | null | undefined) {
+function isValidCoord(value: number | null | undefined): value is number {
   return Number.isFinite(value ?? NaN);
 }
 
@@ -39,27 +40,28 @@ export function SessionReportClient() {
   const [transactions, setTransactions] = useState<WalletTx[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
+  const liveSessions = useLiveQueryState(async () => {
+    return db.sessions.orderBy("startedAt").reverse().toArray();
+  }, [], [] as Session[]);
+
+  const liveTrips = useLiveQueryState(async () => db.trips.toArray(), [], [] as Trip[]);
+
+  const liveTransactions = useLiveQueryState(async () => db.wallet_tx.toArray(), [], [] as WalletTx[]);
+
   useEffect(() => {
-    void (async () => {
-      const [sessionRows, tripRows, txRows] = await Promise.all([
-        db.sessions.orderBy("startedAt").reverse().toArray(),
-        db.trips.toArray(),
-        db.wallet_tx.toArray()
-      ]);
-      const windowStart = new Date();
-      windowStart.setDate(windowStart.getDate() - 6);
-      windowStart.setHours(0, 0, 0, 0);
-      const recent = sessionRows.filter(
-        (session) => new Date(session.startedAt) >= windowStart
-      );
-      setSessions(recent);
-      setTrips(tripRows);
-      setTransactions(txRows);
-      if (recent.length > 0) {
-        setSelectedSessionId(recent[0].id);
-      }
-    })();
-  }, []);
+    const windowStart = new Date();
+    windowStart.setDate(windowStart.getDate() - 6);
+    windowStart.setHours(0, 0, 0, 0);
+    const recent = liveSessions.filter(
+      (session) => new Date(session.startedAt) >= windowStart
+    );
+    setSessions(recent);
+    setTrips(liveTrips);
+    setTransactions(liveTransactions);
+    if (recent.length > 0 && !selectedSessionId) {
+      setSelectedSessionId(recent[0].id);
+    }
+  }, [liveSessions, liveTrips, liveTransactions, selectedSessionId]);
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
@@ -150,10 +152,10 @@ export function SessionReportClient() {
         trip.earnings,
         "trip",
         trip.note ?? "",
-        trip.startLat,
-        trip.startLon,
-        trip.endLat,
-        trip.endLon,
+        trip.startLat ?? "",
+        trip.startLon ?? "",
+        trip.endLat ?? "",
+        trip.endLon ?? "",
         distanceKm.toFixed(2),
         trip.sessionId ?? ""
       ]);

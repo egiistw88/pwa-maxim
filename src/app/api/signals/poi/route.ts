@@ -1,6 +1,38 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+const RETRY_DELAYS_MS = [500, 1500];
+
+async function fetchWithRetry(url: string, body: string) {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        body,
+        headers: {
+          "Content-Type": "text/plain"
+        },
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        throw new Error(`Overpass gagal: ${response.status}`);
+      }
+      return response;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Overpass error");
+      if (attempt < RETRY_DELAYS_MS.length) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  throw lastError ?? new Error("Overpass error");
+}
+
 const querySchema = z
   .string()
   .transform((value) => value.split(",").map((entry) => Number(entry.trim())))
@@ -34,34 +66,15 @@ export async function GET(request: Request) {
   const query = `
     [out:json][timeout:25];
     (
-      nwr["amenity"~"university|hospital|marketplace|bus_station|taxi|restaurant|cafe|fast_food|food_court"][bbox:${minLat},${minLon},${maxLat},${maxLon}];
-      nwr["shop"~"mall|supermarket|convenience|marketplace"][bbox:${minLat},${minLon},${maxLat},${maxLon}];
-      nwr["leisure"~"park|sports_centre"][bbox:${minLat},${minLon},${maxLat},${maxLon}];
+      nwr["amenity"~"restaurant|cafe|fast_food|food_court|marketplace|bus_station|taxi"][bbox:${minLat},${minLon},${maxLat},${maxLon}];
+      nwr["shop"~"supermarket|convenience|marketplace"][bbox:${minLat},${minLon},${maxLat},${maxLon}];
       nwr["public_transport"~"station|platform"][bbox:${minLat},${minLon},${maxLat},${maxLon}];
     );
     out center;
   `;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-
   try {
-    const response = await fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      body: query,
-      headers: {
-        "Content-Type": "text/plain"
-      },
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      return NextResponse.json(
-        { error: `Overpass gagal: ${response.status}` },
-        { status: 502, headers: errorHeaders }
-      );
-    }
-
+    const response = await fetchWithRetry("https://overpass-api.de/api/interpreter", query);
     const data = (await response.json()) as {
       elements: Array<{
         type: string;
@@ -102,7 +115,5 @@ export async function GET(request: Request) {
       { error: error instanceof Error ? error.message : "Overpass error" },
       { status: 500, headers: errorHeaders }
     );
-  } finally {
-    clearTimeout(timeout);
   }
 }

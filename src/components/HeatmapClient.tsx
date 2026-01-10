@@ -17,31 +17,8 @@ import { attachToActiveSession, computeActiveMinutes } from "../lib/session";
 import type { GeoJsonFeatureCollection } from "../lib/geojsonTypes";
 import { getOrFetchSignal, type SignalMeta } from "../lib/signals";
 import { useNetworkStatus } from "../lib/useNetworkStatus";
-
-const regions = {
-  timur: {
-    label: "Bandung Timur",
-    bbox: [107.64, -6.96, 107.74, -6.86]
-  },
-  tengah: {
-    label: "Bandung Tengah",
-    bbox: [107.58, -6.95, 107.64, -6.88]
-  },
-  utara: {
-    label: "Bandung Utara",
-    bbox: [107.57, -6.88, 107.69, -6.8]
-  },
-  selatan: {
-    label: "Bandung Selatan",
-    bbox: [107.57, -7.02, 107.69, -6.95]
-  },
-  barat: {
-    label: "Bandung Barat",
-    bbox: [107.5, -6.96, 107.58, -6.86]
-  }
-};
-
-type RegionKey = keyof typeof regions;
+import { regions, type RegionKey } from "../lib/regions";
+import { useLiveQueryState } from "../lib/useLiveQueryState";
 
 const tripSchema = z.object({
   startedAt: z.string().min(1, "Mulai wajib"),
@@ -123,29 +100,33 @@ export function HeatmapClient() {
     return [(minLon + maxLon) / 2, (minLat + maxLat) / 2] as [number, number];
   }, [region]);
 
+  const liveTrips = useLiveQueryState(async () => {
+    return db.trips.orderBy("startedAt").reverse().toArray();
+  }, [], [] as Trip[]);
+
+  const liveSettings = useLiveQueryState(async () => getSettings(), [], null as Settings | null);
+
+  const liveSession = useLiveQueryState(async () => {
+    const openSessions = await db.sessions.where("status").anyOf("active", "paused").toArray();
+    if (openSessions.length === 0) {
+      return null;
+    }
+    return openSessions.sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    )[0];
+  }, [], null as Session | null);
+
   useEffect(() => {
-    let mounted = true;
-    const loadSession = async () => {
-      const openSessions = await db.sessions.where("status").anyOf("active", "paused").toArray();
-      if (!mounted) {
-        return;
-      }
-      if (openSessions.length === 0) {
-        setActiveSession(null);
-        return;
-      }
-      const latest = openSessions.sort(
-        (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
-      )[0];
-      setActiveSession(latest ?? null);
-    };
-    void loadSession();
-    const interval = window.setInterval(loadSession, 60_000);
-    return () => {
-      mounted = false;
-      window.clearInterval(interval);
-    };
-  }, []);
+    setTrips(liveTrips);
+  }, [liveTrips]);
+
+  useEffect(() => {
+    setSettings(liveSettings);
+  }, [liveSettings]);
+
+  useEffect(() => {
+    setActiveSession(liveSession);
+  }, [liveSession]);
 
   useEffect(() => {
     if (!activeSession) {
@@ -280,19 +261,22 @@ export function HeatmapClient() {
   }, [center]);
 
   useEffect(() => {
-    void loadTrips();
-    void loadSettings();
-  }, []);
+    if (!settings) {
+      void loadSettings();
+    }
+  }, [settings]);
 
   useEffect(() => {
     if (!internalEnabled) {
       return;
     }
-    const points = trips.map((trip) => ({
-      lat: trip.startLat,
-      lon: trip.startLon,
-      value: Math.max(trip.earnings, 1)
-    }));
+    const points = trips
+      .filter((trip) => trip.startLat !== null && trip.startLon !== null)
+      .map((trip) => ({
+        lat: trip.startLat as number,
+        lon: trip.startLon as number,
+        value: Math.max(trip.earnings, 1)
+      }));
     const cells = binPointsToH3(points, H3_RESOLUTION);
     setInternalGeoJson(h3CellsToGeoJSON(cells));
   }, [trips, internalEnabled]);
@@ -335,11 +319,6 @@ export function HeatmapClient() {
       void loadSignals(false);
     }
   }, [rainEnabled, weather, regionKey]);
-
-  async function loadTrips() {
-    const data = await db.trips.orderBy("startedAt").reverse().toArray();
-    setTrips(data);
-  }
 
   async function loadSettings() {
     const loaded = await getSettings();
@@ -454,7 +433,6 @@ export function HeatmapClient() {
     const tripWithSession = await attachToActiveSession(trip);
     await db.trips.add(tripWithSession);
     event.currentTarget.reset();
-    await loadTrips();
     setStatus("Trip tersimpan.");
   }
 
@@ -468,7 +446,11 @@ export function HeatmapClient() {
 
     const internalCounts = new Map<string, number>();
     trips.forEach((trip) => {
-      if (!inBbox(trip.startLat, trip.startLon)) {
+      if (
+        trip.startLat === null ||
+        trip.startLon === null ||
+        !inBbox(trip.startLat, trip.startLon)
+      ) {
         return;
       }
       const cell = latLngToCell(trip.startLat, trip.startLon, settingsData.preferredH3Res);
@@ -645,7 +627,6 @@ export function HeatmapClient() {
       };
       const tripWithSession = await attachToActiveSession(trip);
       await db.trips.add(tripWithSession);
-      await loadTrips();
       const durationHours = Math.max(
         (new Date(endedAt).getTime() - new Date(draftTripStart.startedAt).getTime()) /
           3_600_000,
@@ -707,95 +688,92 @@ export function HeatmapClient() {
   return (
     <div className="grid" style={{ gap: 24 }}>
       <div className="card">
-        <div className="grid two">
+        <h2 className="page-title">Heatmap Bandung</h2>
+        <p className="helper-text">
+          Peta heatmap local-first dari trip internal, POI, dan cuaca. Data tetap tersedia offline.
+        </p>
+        <div className="stacked" style={{ marginTop: 12 }}>
           <div>
-            <h2>Heatmap Bandung</h2>
-            <p className="helper-text">
-              Peta heatmap local-first dari trip internal + POI + cuaca. Semua data
-              disimpan offline.
-            </p>
-          </div>
-          <div className="grid">
-            <div className="form-row">
-              <div>
-                <label htmlFor="region">Wilayah</label>
-                <select
-                  id="region"
-                  value={regionKey}
-                  onChange={(event) => setRegionKey(event.target.value as RegionKey)}
-                >
-                  {Object.entries(regions).map(([key, value]) => (
-                    <option key={key} value={key}>
-                      {value.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label>&nbsp;</label>
+            <strong>Wilayah</strong>
+            <div className="segment-group" style={{ marginTop: 8 }}>
+              {Object.entries(regions).map(([key, value]) => (
                 <button
+                  key={key}
                   type="button"
-                  className="ghost"
-                  onClick={() => {
-                    const map = mapRef.current;
-                    if (!map) {
-                      return;
-                    }
-                    const [minLon, minLat, maxLon, maxLat] = region.bbox;
-                    map.fitBounds(
-                      [
-                        [minLon, minLat],
-                        [maxLon, maxLat]
-                      ],
-                      { padding: 20 }
-                    );
-                  }}
+                  className={`segment-button ${regionKey === key ? "active" : ""}`}
+                  onClick={() => setRegionKey(key as RegionKey)}
                 >
-                  Fit to area
+                  {value.label.replace("Bandung ", "")}
                 </button>
-              </div>
+              ))}
             </div>
-            <div className="form-row">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={internalEnabled}
-                  onChange={(event) => setInternalEnabled(event.target.checked)}
-                />{" "}
-                Heatmap internal
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={poiEnabled}
-                  onChange={(event) => setPoiEnabled(event.target.checked)}
-                />{" "}
-                Heatmap POI
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={rainEnabled}
-                  onChange={(event) => setRainEnabled(event.target.checked)}
-                />{" "}
-                Rain risk
-              </label>
-            </div>
-            <div className="form-row">
-              <button type="button" onClick={() => void loadSignals(true)}>
-                Refresh Sinyal
+          </div>
+          <div>
+            <strong>Layer</strong>
+            <div className="toggle-row" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className={internalEnabled ? "segment-button active" : "segment-button"}
+                onClick={() => setInternalEnabled((prev) => !prev)}
+              >
+                Internal
               </button>
-              {rainRisk && (
-                <span className={`badge ${rainRisk.variant === "danger" ? "danger" : "success"}`}>
-                  {rainRisk.label}
-                </span>
-              )}
+              <button
+                type="button"
+                className={poiEnabled ? "segment-button active" : "segment-button"}
+                onClick={() => setPoiEnabled((prev) => !prev)}
+              >
+                POI
+              </button>
+              <button
+                type="button"
+                className={rainEnabled ? "segment-button active" : "segment-button"}
+                onClick={() => setRainEnabled((prev) => !prev)}
+              >
+                Cuaca
+              </button>
+            </div>
+          </div>
+          <div className="status-panel">
+            <div className="form-row">
               <span className={`badge ${isOnline ? "success" : "danger"}`}>
                 {isOnline ? "Online" : "Offline"}
               </span>
+              <span className="badge">{poiCacheLabel}</span>
+              <span className="badge">{weatherCacheLabel}</span>
+              {rainRisk && (
+                <span
+                  className={`badge ${rainRisk.variant === "danger" ? "danger" : "success"}`}
+                >
+                  {rainRisk.label}
+                </span>
+              )}
             </div>
-            <div className="helper-text">{poiCacheLabel}</div>
-            <div className="helper-text">{weatherCacheLabel}</div>
+            <div className="form-row">
+              <button type="button" className="ghost" onClick={() => void loadSignals(true)}>
+                Refresh Sinyal
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  const map = mapRef.current;
+                  if (!map) {
+                    return;
+                  }
+                  const [minLon, minLat, maxLon, maxLat] = region.bbox;
+                  map.fitBounds(
+                    [
+                      [minLon, minLat],
+                      [maxLon, maxLat]
+                    ],
+                    { padding: 20 }
+                  );
+                }}
+              >
+                Fit Area
+              </button>
+            </div>
             {status && <div className="helper-text">{status}</div>}
           </div>
         </div>
@@ -827,7 +805,7 @@ export function HeatmapClient() {
             )}
             <div className="form-row">
               <button type="button" onClick={() => void handleStartNgetem()}>
-                Saya sedang ngetem
+                Ngetem Now
               </button>
               {countdown !== null && countdown > 0 && (
                 <span className="badge">
@@ -1007,9 +985,15 @@ function formatCacheLabel(label: string, meta: SignalMeta | null) {
   if (!meta || meta.ageSeconds === null) {
     return `${label}: belum ada cache`;
   }
+  const hours = (meta.ageSeconds / 3600).toFixed(1);
+  if (meta.lastErrorAt && meta.lastErrorMessage) {
+    return `${label}: cached (${hours} jam) • gagal: ${meta.lastErrorMessage}`;
+  }
   if (meta.isFresh && !meta.fromCache) {
     return `${label}: fresh`;
   }
-  const hours = (meta.ageSeconds / 3600).toFixed(1);
+  if (meta.isStale) {
+    return `${label}: cached (stale ${hours} jam)`;
+  }
   return `${label}: cached ${hours} jam`;
 }

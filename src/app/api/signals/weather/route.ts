@@ -1,6 +1,33 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+const RETRY_DELAYS_MS = [500, 1500];
+
+async function fetchWithRetry(url: string) {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        throw new Error(`Open-Meteo gagal: ${response.status}`);
+      }
+      return response;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Open-Meteo error");
+      if (attempt < RETRY_DELAYS_MS.length) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  throw lastError ?? new Error("Open-Meteo error");
+}
+
 const paramSchema = z.object({
   lat: z.coerce.number(),
   lon: z.coerce.number()
@@ -32,21 +59,8 @@ export async function GET(request: Request) {
   apiUrl.searchParams.set("forecast_days", "2");
   apiUrl.searchParams.set("timezone", "Asia/Jakarta");
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-
   try {
-    const response = await fetch(apiUrl.toString(), {
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      return NextResponse.json(
-        { error: `Open-Meteo gagal: ${response.status}` },
-        { status: 502, headers: errorHeaders }
-      );
-    }
-
+    const response = await fetchWithRetry(apiUrl.toString());
     const data = (await response.json()) as {
       hourly: { time: string[]; precipitation_probability: number[] };
     };
@@ -67,7 +81,5 @@ export async function GET(request: Request) {
       { error: error instanceof Error ? error.message : "Open-Meteo error" },
       { status: 500, headers: errorHeaders }
     );
-  } finally {
-    clearTimeout(timeout);
   }
 }
