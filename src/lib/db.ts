@@ -22,6 +22,30 @@ export type WalletTx = {
   note?: string;
 };
 
+export type Settings = {
+  id: "default";
+  dailyTargetNet: number;
+  dailyTargetGross?: number | null;
+  costPerKmEstimate?: number | null;
+  costPerKmEstimateMethod: "fuel-only" | "all-expense" | "manual";
+  fuelCategoryName: string;
+  distanceMode: "trip-only" | "trip+deadhead";
+  manualCostPerKm?: number | null;
+  costPerKm?: number;
+};
+
+export const defaultSettings: Settings = {
+  id: "default",
+  dailyTargetNet: 200_000,
+  dailyTargetGross: null,
+  costPerKmEstimate: null,
+  costPerKmEstimateMethod: "fuel-only",
+  fuelCategoryName: "BBM",
+  distanceMode: "trip-only",
+  manualCostPerKm: null,
+  costPerKm: 250
+};
+
 export type SignalCache = {
   key: string;
   fetchedAt: string;
@@ -34,6 +58,7 @@ class AppDB extends Dexie {
   trips!: Table<Trip, string>;
   wallet_tx!: Table<WalletTx, string>;
   signal_cache!: Table<SignalCache, string>;
+  settings!: Table<Settings, string>;
 
   constructor() {
     super("pwa_maxim_db");
@@ -42,6 +67,20 @@ class AppDB extends Dexie {
       wallet_tx: "id, createdAt, type",
       signal_cache: "key, fetchedAt"
     });
+    this.version(2)
+      .stores({
+        trips: "id, startedAt, endedAt",
+        wallet_tx: "id, createdAt, type",
+        signal_cache: "key, fetchedAt",
+        settings: "id"
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table<Settings, string>("settings");
+        const existing = await table.get("default");
+        if (!existing) {
+          await table.put(defaultSettings);
+        }
+      });
   }
 }
 
