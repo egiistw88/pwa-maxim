@@ -3,10 +3,12 @@ import { db, type SignalCache } from "./db";
 export type SignalMeta = {
   fetchedAt: string | null;
   isFresh: boolean;
+  isStale: boolean;
   ageSeconds: number | null;
   ttlSeconds: number;
   fromCache: boolean;
   lastErrorAt: string | null;
+  lastErrorMessage: string | null;
 };
 
 export type SignalResult<T> = {
@@ -55,7 +57,8 @@ export async function getOrFetchSignal<T>(
       fetchedAt: new Date().toISOString(),
       ttlSeconds,
       payload,
-      lastErrorAt: null
+      lastErrorAt: null,
+      lastErrorMessage: null
     };
     await db.signal_cache.put(record);
     return buildResult<T>(record, false);
@@ -63,7 +66,8 @@ export async function getOrFetchSignal<T>(
     if (cached) {
       const updated: SignalCache = {
         ...cached,
-        lastErrorAt: new Date().toISOString()
+        lastErrorAt: new Date().toISOString(),
+        lastErrorMessage: error instanceof Error ? error.message : "Gagal mengambil sinyal"
       };
       await db.signal_cache.put(updated);
       return buildResult<T>(updated, true);
@@ -89,15 +93,18 @@ function isInCooldown(cache: SignalCache) {
 function buildResult<T>(cache: SignalCache, fromCache: boolean): SignalResult<T> {
   const ageSeconds = getAgeSeconds(cache.fetchedAt);
   const isFresh = ageSeconds !== null ? ageSeconds < cache.ttlSeconds : false;
+  const isStale = !isFresh;
   return {
     payload: cache.payload as T,
     meta: {
       fetchedAt: cache.fetchedAt ?? null,
       isFresh,
+      isStale,
       ageSeconds,
       ttlSeconds: cache.ttlSeconds,
       fromCache,
-      lastErrorAt: cache.lastErrorAt ?? null
+      lastErrorAt: cache.lastErrorAt ?? null,
+      lastErrorMessage: cache.lastErrorMessage ?? null
     }
   };
 }

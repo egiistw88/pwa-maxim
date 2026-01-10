@@ -81,6 +81,9 @@ export function buildCellFeatures({
   let latestTripMs = 0;
 
   trips.forEach((trip) => {
+    if (trip.startLat === null || trip.startLon === null) {
+      return;
+    }
     const tripCell = latLngToCell(trip.startLat, trip.startLon, settings.preferredH3Res);
     if (tripCell !== cellH3) {
       return;

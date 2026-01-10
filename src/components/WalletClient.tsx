@@ -3,10 +3,20 @@
 import { nanoid } from "nanoid";
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
-import { db, defaultSettings, normalizeSettings, type Session, type Settings, type Trip, type WalletTx } from "../lib/db";
-import { haversineKm } from "../lib/geo";
+import {
+  db,
+  defaultSettings,
+  normalizeSettings,
+  type Session,
+  type Settings,
+  type Trip,
+  type WalletTx
+} from "../lib/db";
+import { hasTripCoords, haversineKm, isFiniteNumber } from "../lib/geo";
 import { attachToActiveSession, computeActiveMinutes } from "../lib/session";
 import { dailySummary, rangeSummary, sumByCategory } from "../lib/walletAnalytics";
+import { getSettings } from "../lib/settings";
+import { useLiveQueryState } from "../lib/useLiveQueryState";
 
 const walletSchema = z.object({
   type: z.enum(["income", "expense"]),
@@ -17,6 +27,7 @@ const walletSchema = z.object({
 });
 
 const CATEGORY_PRESETS = ["BBM", "Makan", "Servis", "Pulsa", "Parkir", "Cuci", "Lainnya"];
+const QUICK_EXPENSES = ["BBM", "Makan", "Parkir", "Servis"];
 
 const formatCurrency = (value: number) => `Rp ${value.toLocaleString("id-ID")}`;
 
@@ -36,33 +47,41 @@ export function WalletClient() {
   const [formNote, setFormNote] = useState("");
   const [formDate, setFormDate] = useState(new Date().toISOString().slice(0, 10));
 
-  useEffect(() => {
-    void loadData();
-  }, []);
+  const liveTransactions = useLiveQueryState(async () => {
+    return db.wallet_tx.orderBy("createdAt").reverse().toArray();
+  }, [], [] as WalletTx[]);
+
+  const liveTrips = useLiveQueryState(async () => {
+    return db.trips.orderBy("startedAt").reverse().toArray();
+  }, [], [] as Trip[]);
+
+  const liveSettings = useLiveQueryState(async () => getSettings(), [], defaultSettings);
+
+  const liveSession = useLiveQueryState(async () => {
+    const sessions = await db.sessions.where("status").anyOf("active", "paused").toArray();
+    if (sessions.length === 0) {
+      return null;
+    }
+    return sessions.sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    )[0];
+  }, [], null as Session | null);
 
   useEffect(() => {
-    let mounted = true;
-    const loadSession = async () => {
-      const sessions = await db.sessions.where("status").anyOf("active", "paused").toArray();
-      if (!mounted) {
-        return;
-      }
-      if (sessions.length === 0) {
-        setActiveSession(null);
-        return;
-      }
-      const latest = sessions.sort(
-        (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
-      )[0];
-      setActiveSession(latest ?? null);
-    };
-    void loadSession();
-    const interval = window.setInterval(loadSession, 60_000);
-    return () => {
-      mounted = false;
-      window.clearInterval(interval);
-    };
-  }, []);
+    setTransactions(liveTransactions);
+  }, [liveTransactions]);
+
+  useEffect(() => {
+    setTrips(liveTrips);
+  }, [liveTrips]);
+
+  useEffect(() => {
+    setSettings(normalizeSettings(liveSettings));
+  }, [liveSettings]);
+
+  useEffect(() => {
+    setActiveSession(liveSession);
+  }, [liveSession]);
 
   useEffect(() => {
     if (!activeSession) {
@@ -88,24 +107,10 @@ export function WalletClient() {
     }
   }, [activeSession]);
 
-  async function loadData() {
-    const [txs, storedTrips, storedSettings] = await Promise.all([
-      db.wallet_tx.orderBy("createdAt").reverse().toArray(),
-      db.trips.orderBy("startedAt").reverse().toArray(),
-      db.settings.get("default")
-    ]);
-
-    const normalizedSettings = normalizeSettings(storedSettings);
-
-    if (!storedSettings) {
-      await db.settings.put(normalizedSettings);
-    } else if (JSON.stringify(storedSettings) !== JSON.stringify(normalizedSettings)) {
-      await db.settings.put(normalizedSettings);
-    }
-
-    setTransactions(txs);
-    setTrips(storedTrips);
-    setSettings(normalizedSettings);
+  function handleQuickExpense(category: string) {
+    setFormType("expense");
+    setFormCategory(category);
+    setFormAmount("0");
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -141,7 +146,6 @@ export function WalletClient() {
     setFormType("income");
     setFormCategory("Order");
     setFormDate(new Date().toISOString().slice(0, 10));
-    await loadData();
     setStatus("Transaksi tersimpan.");
   }
 
@@ -202,33 +206,28 @@ export function WalletClient() {
       })
       .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
 
-    const isValidCoord = (value: number) => Number.isFinite(value);
-
     let distanceKm = 0;
     let lastTripForDeadhead: Trip | null = null;
 
     for (const trip of rangeTrips) {
-      const hasTripCoords =
-        isValidCoord(trip.startLat) &&
-        isValidCoord(trip.startLon) &&
-        isValidCoord(trip.endLat) &&
-        isValidCoord(trip.endLon);
-
-      if (hasTripCoords) {
+      const tripHasCoords = hasTripCoords(trip);
+      if (tripHasCoords) {
         distanceKm += haversineKm(trip.startLat, trip.startLon, trip.endLat, trip.endLon);
       }
 
       if (settings.distanceMode === "trip+deadhead") {
-        const hasStartCoords = isValidCoord(trip.startLat) && isValidCoord(trip.startLon);
-        if (lastTripForDeadhead && hasStartCoords) {
-          distanceKm += haversineKm(
-            lastTripForDeadhead.endLat,
-            lastTripForDeadhead.endLon,
-            trip.startLat,
-            trip.startLon
-          );
+        if (
+          lastTripForDeadhead &&
+          isFiniteNumber(trip.startLat) &&
+          isFiniteNumber(trip.startLon) &&
+          isFiniteNumber(lastTripForDeadhead.endLat) &&
+          isFiniteNumber(lastTripForDeadhead.endLon)
+        ) {
+          const { startLat, startLon } = trip;
+          const { endLat, endLon } = lastTripForDeadhead;
+          distanceKm += haversineKm(endLat, endLon, startLat, startLon);
         }
-        if (isValidCoord(trip.endLat) && isValidCoord(trip.endLon)) {
+        if (isFiniteNumber(trip.endLat) && isFiniteNumber(trip.endLon)) {
           lastTripForDeadhead = trip;
         }
       }
@@ -343,7 +342,7 @@ export function WalletClient() {
   return (
     <div className="grid" style={{ gap: 24 }}>
       <div className="card">
-        <h2>Dompet Harian</h2>
+        <h2 className="page-title">Dompet Harian</h2>
         <p className="helper-text">
           Catat pemasukan dan pengeluaran. Data tersimpan offline di perangkat.
         </p>
@@ -351,6 +350,21 @@ export function WalletClient() {
 
       <div className="card">
         <h3>Tambah Transaksi</h3>
+        <div className="helper-text" style={{ marginBottom: 8 }}>
+          Quick expense:
+        </div>
+        <div className="form-row">
+          {QUICK_EXPENSES.map((item) => (
+            <button
+              key={item}
+              type="button"
+              className="secondary"
+              onClick={() => handleQuickExpense(item)}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
         <form className="grid" onSubmit={handleSubmit}>
           <div className="form-row">
             <div>
@@ -471,6 +485,9 @@ export function WalletClient() {
                 : todaySummary.net)}
             </strong>
           </p>
+          <p className="helper-text">
+            Pace per jam aktif: {netPerActiveHour ? formatCurrency(netPerActiveHour) : "N/A"}
+          </p>
           {(summaryMode === "session" ? sessionSummary?.topExpenseCategory : todaySummary.topExpenseCategory) && (
             <p className="helper-text">
               Top expense:{" "}
@@ -547,8 +564,8 @@ export function WalletClient() {
             <p className="helper-text">Target bersih: {formatCurrency(targetNet)}</p>
             <div
               style={{
-                height: 10,
-                background: "#e5e7eb",
+                height: 14,
+                background: "#1a2430",
                 borderRadius: 999,
                 overflow: "hidden",
                 margin: "8px 0"
@@ -558,7 +575,7 @@ export function WalletClient() {
                 style={{
                   width: `${Math.min(progress * 100, 100)}%`,
                   height: "100%",
-                  background: "#1f6feb"
+                  background: "var(--primary)"
                 }}
               />
             </div>
@@ -815,18 +832,20 @@ function downloadTripsCsv(trips: Trip[]) {
     "endLon",
     "earnings",
     "note",
-    "sessionId"
+    "sessionId",
+    "source"
   ];
   const rows = trips.map((trip) => [
     trip.startedAt,
     trip.endedAt,
-    trip.startLat,
-    trip.startLon,
-    trip.endLat,
-    trip.endLon,
+    trip.startLat ?? "",
+    trip.startLon ?? "",
+    trip.endLat ?? "",
+    trip.endLon ?? "",
     trip.earnings,
     trip.note ?? "",
-    trip.sessionId ?? ""
+    trip.sessionId ?? "",
+    trip.source
   ]);
   downloadCsv("trips.csv", header, rows);
 }

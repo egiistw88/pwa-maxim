@@ -1,14 +1,19 @@
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   font-family: "Inter", system-ui, sans-serif;
-  --bg: #f8f9fb;
-  --card: #ffffff;
-  --text: #1b1f24;
-  --muted: #5f6b7a;
-  --primary: #1f6feb;
-  --border: #e5e7eb;
-  --success: #0f766e;
-  --danger: #b42318;
+  font-size: 16px;
+  --bg: #0b0f14;
+  --card: #121a22;
+  --text: #eaf2f7;
+  --muted: #9fb0bf;
+  --primary: #00b140;
+  --border: #1f2a36;
+  --success: #26d07c;
+  --warning: #ffc53d;
+  --danger: #ff4d4f;
+  --nav: #0f141b;
+  --nav-border: #1b2430;
+  --shadow: rgba(0, 0, 0, 0.3);
 }
 
 * {
@@ -19,6 +24,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
+  min-height: 100vh;
 }
 
 a {
@@ -27,20 +33,21 @@ a {
 }
 
 main {
-  padding: 24px;
+  flex: 1;
+  padding: 16px 16px 96px;
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 980px;
   margin: 0 auto;
 }
 
 .card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 16px;
   padding: 16px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 12px 28px var(--shadow);
 }
 
 .grid {
@@ -74,31 +81,35 @@ select,
 button,
 textarea {
   font: inherit;
+  font-size: 1rem;
 }
 
 input,
 select,
 textarea {
   width: 100%;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 12px 12px;
+  border-radius: 12px;
   border: 1px solid var(--border);
-  background: #fff;
+  background: #0f141b;
+  color: var(--text);
 }
 
 button {
   cursor: pointer;
   border: none;
-  border-radius: 8px;
-  padding: 10px 16px;
+  border-radius: 12px;
+  padding: 12px 16px;
   background: var(--primary);
-  color: #fff;
-  font-weight: 600;
+  color: #0b0f14;
+  font-weight: 700;
+  min-height: 48px;
 }
 
 button.secondary {
-  background: #eef2ff;
-  color: #3730a3;
+  background: #1c2a22;
+  color: var(--text);
+  border: 1px solid #214130;
 }
 
 button.ghost {
@@ -107,65 +118,129 @@ button.ghost {
   border: 1px solid var(--border);
 }
 
+button.warning {
+  background: #3a2f10;
+  color: var(--warning);
+  border: 1px solid #6a4b17;
+}
+
+button.danger {
+  background: #321315;
+  color: var(--danger);
+  border: 1px solid #5c1f22;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
   padding: 4px 8px;
   border-radius: 999px;
   font-size: 0.75rem;
-  background: #eef2ff;
-  color: #3730a3;
+  background: #1a2430;
+  color: var(--text);
 }
 
 .badge.danger {
-  background: #fee4e2;
+  background: #3a171b;
   color: var(--danger);
 }
 
 .badge.success {
-  background: #dcfce7;
+  background: #0f2f25;
   color: var(--success);
 }
 
-.nav {
-  background: #fff;
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  z-index: 20;
+.badge.warning {
+  background: #3a2f10;
+  color: var(--warning);
 }
 
-.nav-inner {
-  max-width: 1200px;
-  margin: 0 auto;
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--nav);
+  border-bottom: 1px solid var(--nav-border);
+  padding: 12px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 24px;
 }
 
-.tabs {
+.app-header-title {
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.tab {
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1px solid transparent;
+.app-header-title strong {
+  font-size: 1rem;
+}
+
+.app-header-title span {
+  font-size: 0.8rem;
   color: var(--muted);
-  font-weight: 600;
 }
 
-.tab.active {
-  background: #eef2ff;
-  color: #3730a3;
-  border-color: #c7d2fe;
+.status-pill {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+}
+
+.status-pill.online {
+  color: var(--success);
+  border-color: #1b4032;
+}
+
+.status-pill.offline {
+  color: var(--danger);
+  border-color: #4b1c1f;
+}
+
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--nav);
+  border-top: 1px solid var(--nav-border);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 8px 12px 12px;
+  gap: 8px;
+  z-index: 40;
+}
+
+.bottom-nav a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 8px;
+  border-radius: 16px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  min-height: 52px;
+}
+
+.bottom-nav a.active {
+  background: #142117;
+  color: var(--text);
+  border: 1px solid #1f3b2b;
 }
 
 .map-wrapper {
-  height: 460px;
-  border-radius: 12px;
+  height: 360px;
+  border-radius: 16px;
   overflow: hidden;
   border: 1px solid var(--border);
 }
@@ -182,14 +257,14 @@ button.ghost {
 
 .list-item {
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid var(--border);
-  background: #fff;
+  background: #0f141b;
 }
 
 .list-item.active {
   border-color: #1f6feb;
-  background: #eef2ff;
+  background: #122131;
 }
 
 .legend {
@@ -202,7 +277,7 @@ button.ghost {
   height: 10px;
   width: 120px;
   border-radius: 999px;
-  background: linear-gradient(90deg, #bfdbfe, #2563eb);
+  background: linear-gradient(90deg, #1f2a36, #00b140);
 }
 
 .update-toast {
@@ -218,4 +293,77 @@ button.ghost {
   border-radius: 12px;
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.25);
   z-index: 50;
+}
+
+.page-title {
+  font-size: 1.2rem;
+  margin: 0 0 4px;
+}
+
+.segment-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.segment-button {
+  background: #0f141b;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  border-radius: 999px;
+  min-height: 44px;
+}
+
+.segment-button.active {
+  background: #142117;
+  color: var(--text);
+  border-color: #1f3b2b;
+}
+
+.status-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #0f141b;
+}
+
+.stacked {
+  display: grid;
+  gap: 8px;
+}
+
+.sticky-cta {
+  position: sticky;
+  bottom: 88px;
+  z-index: 10;
+}
+
+.drive-screen {
+  display: grid;
+  gap: 16px;
+}
+
+.drive-actions {
+  display: grid;
+  gap: 12px;
+}
+
+.drive-actions button {
+  font-size: 1rem;
+  min-height: 64px;
+}
+
+.hold-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.toggle-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
 }

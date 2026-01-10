@@ -5,13 +5,13 @@ export type Trip = {
   id: string;
   startedAt: string;
   endedAt: string;
-  startLat: number;
-  startLon: number;
-  endLat: number;
-  endLon: number;
+  startLat: number | null;
+  startLon: number | null;
+  endLat: number | null;
+  endLon: number | null;
   earnings: number;
   note?: string;
-  source: "manual" | "assistant";
+  source: "manual" | "assistant" | "import:maxim";
   sessionId?: string;
 };
 
@@ -40,6 +40,7 @@ export type Settings = {
   preferredH3Res: number;
   weights: Record<string, number>;
   autoAttachToActiveSession: boolean;
+  autoAddIncomeFromTrips: boolean;
   defaultBreakMinutes: number;
   baseAreaKey: string;
 };
@@ -59,6 +60,7 @@ export const defaultSettings: Settings = {
   preferredH3Res: 10,
   weights: defaultWeights(),
   autoAttachToActiveSession: true,
+  autoAddIncomeFromTrips: true,
   defaultBreakMinutes: 30,
   baseAreaKey: "timur"
 };
@@ -69,6 +71,7 @@ export type SignalCache = {
   ttlSeconds: number;
   payload: unknown;
   lastErrorAt?: string | null;
+  lastErrorMessage?: string | null;
 };
 
 export function normalizeSettings(settings?: Partial<Settings>): Settings {
@@ -178,6 +181,23 @@ class AppDB extends Dexie {
         }
       });
     this.version(4)
+      .stores({
+        trips: "id, startedAt, endedAt",
+        wallet_tx: "id, createdAt, type",
+        signal_cache: "key, fetchedAt",
+        settings: "id",
+        rec_events: "id, createdAt, areaKey",
+        sessions: "id, startedAt, endedAt, status"
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table<Settings, string>("settings");
+        const existing = await table.get("default");
+        const normalized = normalizeSettings(existing ?? undefined);
+        if (!existing || JSON.stringify(existing) !== JSON.stringify(normalized)) {
+          await table.put(normalized);
+        }
+      });
+    this.version(5)
       .stores({
         trips: "id, startedAt, endedAt",
         wallet_tx: "id, createdAt, type",
