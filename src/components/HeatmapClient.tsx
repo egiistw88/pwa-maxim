@@ -6,8 +6,13 @@ import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from "ma
 import { nanoid } from "nanoid";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
-import { db, type Trip } from "../lib/db";
+import { cellToLatLng, latLngToCell } from "h3-js";
+import { db, type Settings, type Trip } from "../lib/db";
+import { type LatLon, type WeatherSummary } from "../lib/engine/features";
+import { recommendTopCells, type Recommendation } from "../lib/engine/recommend";
+import { updateWeightsFromOutcome, type Weights } from "../lib/engine/scoring";
 import { binPointsToH3, h3CellsToGeoJSON } from "../lib/h3";
+import { getSettings, updateSettings } from "../lib/settings";
 import type { GeoJsonFeatureCollection } from "../lib/geojsonTypes";
 import { getOrFetchSignal, type SignalMeta } from "../lib/signals";
 import { useNetworkStatus } from "../lib/useNetworkStatus";
@@ -36,10 +41,6 @@ const regions = {
 };
 
 type RegionKey = keyof typeof regions;
-
-type WeatherSummary = {
-  hourly: Array<{ time: string; precipitationProbability: number }>;
-};
 
 const tripSchema = z.object({
   startedAt: z.string().min(1, "Mulai wajib"),
@@ -90,13 +91,27 @@ export function HeatmapClient() {
   const [rainEnabled, setRainEnabled] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
+  const [poiPoints, setPoiPoints] = useState<Array<{ lat: number; lon: number }>>([]);
   const [poiMeta, setPoiMeta] = useState<SignalMeta | null>(null);
   const [weatherMeta, setWeatherMeta] = useState<SignalMeta | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(true);
+  const [myPos, setMyPos] = useState<LatLon | null>(null);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [draftTripStart, setDraftTripStart] = useState<{
+    startedAt: string;
+    startLat: number;
+    startLon: number;
+    predictedScoreAtStart: number;
+  } | null>(null);
+  const [earningsInput, setEarningsInput] = useState<string>("");
 
   const { isOnline } = useNetworkStatus();
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const timerRef = useRef<number | null>(null);
 
   const region = regions[regionKey];
   const center = useMemo(() => {
@@ -225,6 +240,7 @@ export function HeatmapClient() {
 
   useEffect(() => {
     void loadTrips();
+    void loadSettings();
   }, []);
 
   useEffect(() => {
@@ -241,6 +257,35 @@ export function HeatmapClient() {
   }, [trips, internalEnabled]);
 
   useEffect(() => {
+    if (countdown === null) {
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
+    if (countdown <= 0) {
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
+    if (timerRef.current) {
+      return;
+    }
+    timerRef.current = window.setInterval(() => {
+      setCountdown((prev) => (prev && prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => {
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [countdown]);
+
+  useEffect(() => {
     void loadSignals(false);
   }, [regionKey]);
 
@@ -253,6 +298,11 @@ export function HeatmapClient() {
   async function loadTrips() {
     const data = await db.trips.orderBy("startedAt").reverse().toArray();
     setTrips(data);
+  }
+
+  async function loadSettings() {
+    const loaded = await getSettings();
+    setSettings(loaded);
   }
 
   async function loadSignals(forceRefresh: boolean) {
@@ -287,6 +337,7 @@ export function HeatmapClient() {
         }
       );
       setPoiMeta(poiResult.meta);
+      setPoiPoints(poiResult.payload.points);
 
       const poiCells = binPointsToH3(
         poiResult.payload.points.map((point) => ({ lat: point.lat, lon: point.lon })),
@@ -365,6 +416,207 @@ export function HeatmapClient() {
     setStatus("Trip tersimpan.");
   }
 
+  function buildCandidateCells(
+    points: Array<{ lat: number; lon: number }>,
+    settingsData: Settings
+  ) {
+    const [minLon, minLat, maxLon, maxLat] = region.bbox;
+    const inBbox = (lat: number, lon: number) =>
+      lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon;
+
+    const internalCounts = new Map<string, number>();
+    trips.forEach((trip) => {
+      if (!inBbox(trip.startLat, trip.startLon)) {
+        return;
+      }
+      const cell = latLngToCell(trip.startLat, trip.startLon, settingsData.preferredH3Res);
+      internalCounts.set(cell, (internalCounts.get(cell) ?? 0) + 1);
+    });
+
+    const poiCounts = new Map<string, number>();
+    points.forEach((point) => {
+      if (!inBbox(point.lat, point.lon)) {
+        return;
+      }
+      const cell = latLngToCell(point.lat, point.lon, settingsData.preferredH3Res);
+      poiCounts.set(cell, (poiCounts.get(cell) ?? 0) + 1);
+    });
+
+    const combined = new Map<string, { internalCount: number; poiCount: number }>();
+    internalCounts.forEach((count, cell) => {
+      combined.set(cell, { internalCount: count, poiCount: poiCounts.get(cell) ?? 0 });
+    });
+    poiCounts.forEach((count, cell) => {
+      if (!combined.has(cell)) {
+        combined.set(cell, { internalCount: 0, poiCount: count });
+      }
+    });
+
+    const ranked = Array.from(combined.entries())
+      .map(([cell, counts]) => ({ cell, ...counts }))
+      .sort((a, b) => b.internalCount - a.internalCount || b.poiCount - a.poiCount)
+      .slice(0, 300);
+
+    return {
+      candidateCells: ranked.map((entry) => entry.cell),
+      poiCounts
+    };
+  }
+
+  async function getCurrentPosition() {
+    return new Promise<LatLon>((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Geolocation tidak didukung"));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        },
+        (error) => {
+          reject(error);
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    });
+  }
+
+  function getRainRiskNext3hValue(value: WeatherSummary | null) {
+    if (!value) {
+      return 0;
+    }
+    const nowMs = Date.now();
+    const horizonMs = nowMs + 3 * 60 * 60 * 1000;
+    const inWindow = value.hourly.filter((entry) => {
+      const entryTime = new Date(entry.time).getTime();
+      return entryTime >= nowMs && entryTime <= horizonMs;
+    });
+    if (inWindow.length === 0) {
+      return 0;
+    }
+    const maxRisk = Math.max(
+      ...inWindow.map((entry) => entry.precipitationProbability)
+    );
+    return Math.min(Math.max(maxRisk / 100, 0), 1);
+  }
+
+  async function handleStartNgetem() {
+    try {
+      setStatus("Mengambil lokasi...");
+      const position = await getCurrentPosition();
+      setMyPos(position);
+      const settingsData = settings ?? (await getSettings());
+      setSettings(settingsData);
+      const { candidateCells, poiCounts } = buildCandidateCells(poiPoints, settingsData);
+      if (candidateCells.length === 0) {
+        setStatus("Belum ada kandidat. Tambah trip atau POI dulu.");
+        return;
+      }
+      const top = recommendTopCells({
+        userLatLon: position,
+        areaKey: regionKey,
+        candidateCells,
+        trips,
+        poiCells: poiCounts,
+        weather,
+        settings: settingsData
+      });
+      setRecommendations(top);
+      const rainRiskValue = getRainRiskNext3hValue(weather);
+      setCountdown(rainRiskValue >= 0.6 ? 10 * 60 : 15 * 60);
+      await db.rec_events.add({
+        id: nanoid(),
+        createdAt: new Date().toISOString(),
+        userLat: position.lat,
+        userLon: position.lon,
+        areaKey: regionKey,
+        recommended: top.map((item) => ({
+          cell: item.cell,
+          score: item.score,
+          reasons: item.reasons
+        }))
+      });
+      setStatus("Rekomendasi siap.");
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "Gagal mengambil lokasi untuk rekomendasi"
+      );
+    }
+  }
+
+  async function handleStartOrder() {
+    try {
+      setStatus("Mengambil lokasi mulai order...");
+      const position = await getCurrentPosition();
+      const predictedScoreAtStart = recommendations[0]?.score ?? 0;
+      setDraftTripStart({
+        startedAt: new Date().toISOString(),
+        startLat: position.lat,
+        startLon: position.lon,
+        predictedScoreAtStart
+      });
+      setStatus("Order dimulai.");
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? error.message : "Gagal mengambil lokasi mulai order"
+      );
+    }
+  }
+
+  async function handleFinishOrder() {
+    if (!draftTripStart) {
+      setStatus("Mulai order dulu.");
+      return;
+    }
+    const earningsValue = Number(earningsInput);
+    if (!Number.isFinite(earningsValue) || earningsValue <= 0) {
+      setStatus("Isi pendapatan minimal.");
+      return;
+    }
+    try {
+      setStatus("Mengambil lokasi selesai order...");
+      const position = await getCurrentPosition();
+      const endedAt = new Date().toISOString();
+      const trip: Trip = {
+        id: nanoid(),
+        startedAt: draftTripStart.startedAt,
+        endedAt,
+        startLat: draftTripStart.startLat,
+        startLon: draftTripStart.startLon,
+        endLat: position.lat,
+        endLon: position.lon,
+        earnings: earningsValue,
+        source: "assistant"
+      };
+      await db.trips.add(trip);
+      await loadTrips();
+      const durationHours = Math.max(
+        (new Date(endedAt).getTime() - new Date(draftTripStart.startedAt).getTime()) /
+          3_600_000,
+        0.1
+      );
+      const actualEph = earningsValue / durationHours;
+      if (settings) {
+        const updatedWeights = updateWeightsFromOutcome({
+          predictedScoreAtStart: draftTripStart.predictedScoreAtStart,
+          actualEph,
+          weights: settings.weights as Weights
+        });
+        const updated = await updateSettings({ weights: updatedWeights });
+        setSettings(updated);
+      }
+      setDraftTripStart(null);
+      setEarningsInput("");
+      setStatus("Order selesai & trip tersimpan.");
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? error.message : "Gagal menyimpan order selesai"
+      );
+    }
+  }
+
   const rainRisk = useMemo(() => {
     if (!weather || !rainEnabled) {
       return null;
@@ -383,6 +635,7 @@ export function HeatmapClient() {
 
   const poiCacheLabel = formatCacheLabel("Sinyal POI", poiMeta);
   const weatherCacheLabel = formatCacheLabel("Cuaca", weatherMeta);
+  const rainRiskValue = useMemo(() => getRainRiskNext3hValue(weather), [weather]);
 
   return (
     <div className="grid" style={{ gap: 24 }}>
@@ -482,6 +735,119 @@ export function HeatmapClient() {
       </div>
 
       <div className="map-wrapper" ref={mapContainerRef} />
+
+      <div className="card">
+        <div className="form-row" style={{ justifyContent: "space-between" }}>
+          <h3>Asisten Ngetem</h3>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setAssistantOpen((prev) => !prev)}
+          >
+            {assistantOpen ? "Tutup" : "Buka"}
+          </button>
+        </div>
+        {assistantOpen && (
+          <div className="grid" style={{ gap: 16 }}>
+            <div className="helper-text">
+              Top rekomendasi spot ngetem, alasan singkat, dan timer adaptif cuaca.
+            </div>
+            <div className="form-row">
+              <button type="button" onClick={() => void handleStartNgetem()}>
+                Saya sedang ngetem
+              </button>
+              {countdown !== null && countdown > 0 && (
+                <span className="badge">
+                  Sisa waktu: {Math.floor(countdown / 60)}:
+                  {String(countdown % 60).padStart(2, "0")}
+                </span>
+              )}
+              {countdown !== null && countdown <= 0 && (
+                <button type="button" className="ghost" onClick={() => void handleStartNgetem()}>
+                  Hitung ulang rekomendasi
+                </button>
+              )}
+            </div>
+            {myPos && (
+              <div className="helper-text">
+                Posisi: {myPos.lat.toFixed(5)}, {myPos.lon.toFixed(5)}
+              </div>
+            )}
+            <div className="grid" style={{ gap: 12 }}>
+              {recommendations.length === 0 && (
+                <div className="helper-text">Belum ada rekomendasi.</div>
+              )}
+              {recommendations.map((rec, index) => {
+                const [lat, lon] = cellToLatLng(rec.cell);
+                const dest = `${lat},${lon}`;
+                return (
+                  <div key={rec.cell} className="card" style={{ padding: 16 }}>
+                    <div className="form-row" style={{ justifyContent: "space-between" }}>
+                      <strong>Spot #{index + 1}</strong>
+                      <span className="badge">Score {rec.score.toFixed(2)}</span>
+                    </div>
+                    <div className="helper-text">
+                      {rec.reasons.map((reason) => (
+                        <div key={reason}>• {reason}</div>
+                      ))}
+                    </div>
+                    <div className="form-row">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => {
+                          window.open(
+                            `https://www.google.com/maps/dir/?api=1&destination=${dest}`,
+                            "_blank"
+                          );
+                        }}
+                      >
+                        Navigasi
+                      </button>
+                      <span className="helper-text">
+                        {lat.toFixed(5)}, {lon.toFixed(5)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="card" style={{ padding: 16 }}>
+              <h4>Input Trip Cepat</h4>
+              <div className="form-row">
+                <button type="button" onClick={() => void handleStartOrder()}>
+                  Mulai order
+                </button>
+                {draftTripStart && (
+                  <span className="badge">
+                    Mulai{" "}
+                    {new Date(draftTripStart.startedAt).toLocaleTimeString("id-ID")}
+                  </span>
+                )}
+              </div>
+              <div className="form-row">
+                <input
+                  type="number"
+                  min="0"
+                  step="1000"
+                  placeholder="Pendapatan (Rp)"
+                  value={earningsInput}
+                  onChange={(event) => setEarningsInput(event.target.value)}
+                />
+                <button type="button" onClick={() => void handleFinishOrder()}>
+                  Selesai order
+                </button>
+              </div>
+              <div className="helper-text">
+                Learning ringan aktif. Bobot akan disesuaikan setelah order selesai.
+              </div>
+            </div>
+            <div className="helper-text">
+              Rain risk 3 jam ke depan: {(rainRiskValue * 100).toFixed(0)}%
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="card grid two">
         <div>
