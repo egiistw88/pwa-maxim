@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { db, type Trip } from "../lib/db";
 import { binPointsToH3, h3CellsToGeoJSON } from "../lib/h3";
+import type { GeoJsonFeatureCollection } from "../lib/geojsonTypes";
 import { getOrFetchSignal, type SignalMeta } from "../lib/signals";
 import { useNetworkStatus } from "../lib/useNetworkStatus";
 
@@ -75,12 +76,12 @@ const mapStyle: StyleSpecification = {
 
 export function HeatmapClient() {
   const [regionKey, setRegionKey] = useState<RegionKey>("timur");
-  const [internalGeoJson, setInternalGeoJson] = useState<GeoJSON.FeatureCollection>({
-    type: "FeatureCollection",
+  const [internalGeoJson, setInternalGeoJson] = useState<GeoJsonFeatureCollection>({
+    type: "FeatureCollection" as const,
     features: []
   });
-  const [poiGeoJson, setPoiGeoJson] = useState<GeoJSON.FeatureCollection>({
-    type: "FeatureCollection",
+  const [poiGeoJson, setPoiGeoJson] = useState<GeoJsonFeatureCollection>({
+    type: "FeatureCollection" as const,
     features: []
   });
   const [weather, setWeather] = useState<WeatherSummary | null>(null);
