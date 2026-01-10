@@ -3,7 +3,7 @@
 import { nanoid } from "nanoid";
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
-import { db, defaultSettings, type Settings, type Trip, type WalletTx } from "../lib/db";
+import { db, defaultSettings, normalizeSettings, type Settings, type Trip, type WalletTx } from "../lib/db";
 import { haversineKm } from "../lib/geo";
 import { dailySummary, rangeSummary, sumByCategory } from "../lib/walletAnalytics";
 
@@ -665,21 +665,6 @@ export function WalletClient() {
       </div>
     </div>
   );
-}
-
-function normalizeSettings(settings?: Partial<Settings>): Settings {
-  const merged: Settings = {
-    ...defaultSettings,
-    ...settings,
-    id: "default"
-  };
-
-  const costPerKm = merged.costPerKmEstimate ?? merged.manualCostPerKm ?? 250;
-
-  return {
-    ...merged,
-    costPerKm
-  };
 }
 
 function downloadWalletCsv(transactions: WalletTx[]) {
