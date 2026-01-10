@@ -15,3 +15,16 @@
 3. Lihat ringkasan harian dan 7 hari terakhir, plus daftar transaksi terbaru.
 
 Semua data disimpan local-first di IndexedDB sehingga tetap tersedia saat offline.
+
+## PWA Install & Offline Test
+
+### Cara install PWA
+1. Jalankan aplikasi lalu buka di browser Chrome/Edge.
+2. Klik tombol **Install** pada address bar atau menu browser.
+3. Pilih **Install** untuk menambahkan ke homescreen/desktop.
+
+### Cara uji offline
+1. Buka `/heatmap` dan `/wallet` saat online (agar shell + cache terisi).
+2. Matikan koneksi internet.
+3. Reload halaman — app tetap menampilkan shell offline dan data Dexie tetap terbaca.
+4. Jika update tersedia, akan muncul banner **Update tersedia** untuk reload.

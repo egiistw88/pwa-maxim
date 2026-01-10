@@ -17,12 +17,16 @@ const querySchema = z
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const bboxParam = url.searchParams.get("bbox");
+  const cacheHeaders = {
+    "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400"
+  };
+  const errorHeaders = { "Cache-Control": "no-store" };
 
   const parsed = querySchema.safeParse(bboxParam ?? "");
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.flatten().formErrors.join(", ") },
-      { status: 400 }
+      { status: 400, headers: errorHeaders }
     );
   }
 
@@ -54,7 +58,7 @@ export async function GET(request: Request) {
     if (!response.ok) {
       return NextResponse.json(
         { error: `Overpass gagal: ${response.status}` },
-        { status: 502 }
+        { status: 502, headers: errorHeaders }
       );
     }
 
@@ -86,14 +90,17 @@ export async function GET(request: Request) {
         Boolean(item)
       );
 
-    return NextResponse.json({
-      points,
-      count: points.length
-    });
+    return NextResponse.json(
+      {
+        points,
+        count: points.length
+      },
+      { headers: cacheHeaders }
+    );
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Overpass error" },
-      { status: 500 }
+      { status: 500, headers: errorHeaders }
     );
   } finally {
     clearTimeout(timeout);

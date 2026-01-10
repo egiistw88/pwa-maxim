@@ -1,3 +1,4 @@
+import type { FeatureCollection, Polygon } from "geojson";
 import { cellToBoundary, latLngToCell } from "h3-js";
 
 export type PointInput = {
@@ -26,7 +27,7 @@ export function binPointsToH3(points: PointInput[], resolution: number) {
   }));
 }
 
-export function h3CellsToGeoJSON(cells: H3CellAggregate[]) {
+export function h3CellsToGeoJSON(cells: H3CellAggregate[]): FeatureCollection<Polygon> {
   const maxValue = cells.reduce((acc, cell) => Math.max(acc, cell.value), 0);
 
   return {

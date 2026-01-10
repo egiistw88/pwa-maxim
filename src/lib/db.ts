@@ -27,6 +27,7 @@ export type SignalCache = {
   fetchedAt: string;
   ttlSeconds: number;
   payload: unknown;
+  lastErrorAt?: string | null;
 };
 
 class AppDB extends Dexie {

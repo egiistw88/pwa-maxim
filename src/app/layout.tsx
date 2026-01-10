@@ -1,9 +1,22 @@
 import "../styles/globals.css";
+import type { Metadata, Viewport } from "next";
 import { Nav } from "../components/Nav";
+import { ServiceWorkerRegister } from "../components/ServiceWorkerRegister";
+import { UpdateToast } from "../components/UpdateToast";
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "PWA Maxim MVP",
-  description: "Heatmap & Dompet untuk Bandung"
+  description: "Heatmap & Dompet untuk Bandung",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Maxim Copilot Bandung"
+  }
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0b0f19"
 };
 
 export default function RootLayout({
@@ -18,6 +31,8 @@ export default function RootLayout({
         <main>
           <div className="container">{children}</div>
         </main>
+        <ServiceWorkerRegister />
+        <UpdateToast />
       </body>
     </html>
   );
