@@ -10,7 +10,7 @@ export type Trip = {
   endLon: number;
   earnings: number;
   note?: string;
-  source: "manual";
+  source: "manual" | "assistant";
 };
 
 export type WalletTx = {
@@ -54,11 +54,36 @@ export type SignalCache = {
   lastErrorAt?: string | null;
 };
 
+export type Settings = {
+  id: "default";
+  costPerKm: number;
+  avgSpeedKmh: number;
+  explorationRate: number;
+  preferredH3Res: number;
+  weights: Record<string, number>;
+};
+
+export type RecommendationEvent = {
+  id: string;
+  createdAt: string;
+  userLat: number;
+  userLon: number;
+  areaKey: string;
+  recommended: Array<{
+    cell: string;
+    score: number;
+    reasons: string[];
+  }>;
+  chosenH3?: string | null;
+  followed?: boolean | null;
+};
+
 class AppDB extends Dexie {
   trips!: Table<Trip, string>;
   wallet_tx!: Table<WalletTx, string>;
   signal_cache!: Table<SignalCache, string>;
   settings!: Table<Settings, string>;
+  rec_events!: Table<RecommendationEvent, string>;
 
   constructor() {
     super("pwa_maxim_db");
@@ -81,6 +106,13 @@ class AppDB extends Dexie {
           await table.put(defaultSettings);
         }
       });
+    this.version(2).stores({
+      trips: "id, startedAt, endedAt",
+      wallet_tx: "id, createdAt, type",
+      signal_cache: "key, fetchedAt",
+      settings: "id",
+      rec_events: "id, createdAt, areaKey"
+    });
   }
 }
 
