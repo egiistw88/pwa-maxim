@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 
 const tabs = [
   { href: "/heatmap", label: "Heatmap" },
-  { href: "/wallet", label: "Dompet" }
+  { href: "/wallet", label: "Dompet" },
+  { href: "/session", label: "Sesi" }
 ];
 
 export function Nav() {

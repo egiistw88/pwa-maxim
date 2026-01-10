@@ -7,12 +7,13 @@ import { nanoid } from "nanoid";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { cellToLatLng, latLngToCell } from "h3-js";
-import { db, type Settings, type Trip } from "../lib/db";
+import { db, type Settings, type Session, type Trip } from "../lib/db";
 import { type LatLon, type WeatherSummary } from "../lib/engine/features";
 import { recommendTopCells, type Recommendation } from "../lib/engine/recommend";
 import { updateWeightsFromOutcome, type Weights } from "../lib/engine/scoring";
 import { binPointsToH3, h3CellsToGeoJSON } from "../lib/h3";
 import { getSettings, updateSettings } from "../lib/settings";
+import { attachToActiveSession, computeActiveMinutes } from "../lib/session";
 import type { GeoJsonFeatureCollection } from "../lib/geojsonTypes";
 import { getOrFetchSignal, type SignalMeta } from "../lib/signals";
 import { useNetworkStatus } from "../lib/useNetworkStatus";
@@ -99,11 +100,14 @@ export function HeatmapClient() {
   const [myPos, setMyPos] = useState<LatLon | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [activeSession, setActiveSession] = useState<Session | null>(null);
+  const [sessionActiveMinutes, setSessionActiveMinutes] = useState<number | null>(null);
   const [draftTripStart, setDraftTripStart] = useState<{
     startedAt: string;
     startLat: number;
     startLon: number;
     predictedScoreAtStart: number;
+    sessionId?: string;
   } | null>(null);
   const [earningsInput, setEarningsInput] = useState<string>("");
 
@@ -118,6 +122,43 @@ export function HeatmapClient() {
     const [minLon, minLat, maxLon, maxLat] = region.bbox;
     return [(minLon + maxLon) / 2, (minLat + maxLat) / 2] as [number, number];
   }, [region]);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadSession = async () => {
+      const openSessions = await db.sessions.where("status").anyOf("active", "paused").toArray();
+      if (!mounted) {
+        return;
+      }
+      if (openSessions.length === 0) {
+        setActiveSession(null);
+        return;
+      }
+      const latest = openSessions.sort(
+        (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+      )[0];
+      setActiveSession(latest ?? null);
+    };
+    void loadSession();
+    const interval = window.setInterval(loadSession, 60_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeSession) {
+      setSessionActiveMinutes(null);
+      return;
+    }
+    const updateActiveMinutes = () => {
+      setSessionActiveMinutes(computeActiveMinutes(activeSession, new Date()));
+    };
+    updateActiveMinutes();
+    const interval = window.setInterval(updateActiveMinutes, 1000);
+    return () => window.clearInterval(interval);
+  }, [activeSession]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -410,7 +451,8 @@ export function HeatmapClient() {
       source: "manual"
     };
 
-    await db.trips.add(trip);
+    const tripWithSession = await attachToActiveSession(trip);
+    await db.trips.add(tripWithSession);
     event.currentTarget.reset();
     await loadTrips();
     setStatus("Trip tersimpan.");
@@ -523,7 +565,15 @@ export function HeatmapClient() {
       });
       setRecommendations(top);
       const rainRiskValue = getRainRiskNext3hValue(weather);
-      setCountdown(rainRiskValue >= 0.6 ? 10 * 60 : 15 * 60);
+      const defaultBreakMinutes = settingsData.defaultBreakMinutes ?? 30;
+      const fatigueReduction = sessionActiveMinutes
+        ? Math.min(Math.floor(sessionActiveMinutes / 60) * 2, 10)
+        : 0;
+      let recommendedMinutes = Math.max(defaultBreakMinutes - fatigueReduction, 10);
+      if (rainRiskValue >= 0.6) {
+        recommendedMinutes = Math.min(recommendedMinutes, 10);
+      }
+      setCountdown(recommendedMinutes * 60);
       await db.rec_events.add({
         id: nanoid(),
         createdAt: new Date().toISOString(),
@@ -551,11 +601,13 @@ export function HeatmapClient() {
       setStatus("Mengambil lokasi mulai order...");
       const position = await getCurrentPosition();
       const predictedScoreAtStart = recommendations[0]?.score ?? 0;
+      const activeSessionId = activeSession?.id;
       setDraftTripStart({
         startedAt: new Date().toISOString(),
         startLat: position.lat,
         startLon: position.lon,
-        predictedScoreAtStart
+        predictedScoreAtStart,
+        sessionId: activeSessionId
       });
       setStatus("Order dimulai.");
     } catch (error) {
@@ -588,9 +640,11 @@ export function HeatmapClient() {
         endLat: position.lat,
         endLon: position.lon,
         earnings: earningsValue,
-        source: "assistant"
+        source: "assistant",
+        sessionId: draftTripStart.sessionId
       };
-      await db.trips.add(trip);
+      const tripWithSession = await attachToActiveSession(trip);
+      await db.trips.add(tripWithSession);
       await loadTrips();
       const durationHours = Math.max(
         (new Date(endedAt).getTime() - new Date(draftTripStart.startedAt).getTime()) /
@@ -636,6 +690,19 @@ export function HeatmapClient() {
   const poiCacheLabel = formatCacheLabel("Sinyal POI", poiMeta);
   const weatherCacheLabel = formatCacheLabel("Cuaca", weatherMeta);
   const rainRiskValue = useMemo(() => getRainRiskNext3hValue(weather), [weather]);
+  const sessionTripEarnings = useMemo(() => {
+    if (!activeSession) {
+      return 0;
+    }
+    return trips
+      .filter((trip) => trip.sessionId === activeSession.id)
+      .reduce((sum, trip) => sum + trip.earnings, 0);
+  }, [activeSession, trips]);
+  const sessionActiveHours = sessionActiveMinutes ? sessionActiveMinutes / 60 : null;
+  const sessionPace =
+    sessionActiveHours && sessionActiveHours > 0
+      ? sessionTripEarnings / sessionActiveHours
+      : null;
 
   return (
     <div className="grid" style={{ gap: 24 }}>
@@ -752,6 +819,12 @@ export function HeatmapClient() {
             <div className="helper-text">
               Top rekomendasi spot ngetem, alasan singkat, dan timer adaptif cuaca.
             </div>
+            {activeSession && (
+              <div className="helper-text">
+                Jam aktif sesi: {sessionActiveHours ? sessionActiveHours.toFixed(2) : "0.00"} jam
+                • Pace sesi: {sessionPace ? `Rp ${sessionPace.toLocaleString("id-ID")}/jam` : "N/A"}
+              </div>
+            )}
             <div className="form-row">
               <button type="button" onClick={() => void handleStartNgetem()}>
                 Saya sedang ngetem

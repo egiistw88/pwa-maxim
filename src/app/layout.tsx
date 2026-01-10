@@ -1,6 +1,7 @@
 import "../styles/globals.css";
 import type { Metadata, Viewport } from "next";
 import { Nav } from "../components/Nav";
+import { SessionBar } from "../components/SessionBar";
 import { ServiceWorkerRegister } from "../components/ServiceWorkerRegister";
 
 export const metadata: Metadata = {
@@ -26,6 +27,7 @@ export default function RootLayout({
   return (
     <html lang="id">
       <body>
+        <SessionBar />
         <Nav />
         <main>
           <div className="container">{children}</div>
