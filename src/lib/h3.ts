@@ -1,5 +1,5 @@
-import type { FeatureCollection, Polygon } from "geojson";
 import { cellToBoundary, latLngToCell } from "h3-js";
+import type { GeoJsonFeatureCollection } from "./geojsonTypes";
 
 export type PointInput = {
   lat: number;
@@ -27,19 +27,21 @@ export function binPointsToH3(points: PointInput[], resolution: number) {
   }));
 }
 
-export function h3CellsToGeoJSON(cells: H3CellAggregate[]): FeatureCollection<Polygon> {
+export function h3CellsToGeoJSON(
+  cells: H3CellAggregate[]
+): GeoJsonFeatureCollection<{ value: number; intensity: number }> {
   const maxValue = cells.reduce((acc, cell) => Math.max(acc, cell.value), 0);
 
   return {
-    type: "FeatureCollection",
+    type: "FeatureCollection" as const,
     features: cells.map((cell) => {
       const boundary = cellToBoundary(cell.cell, true);
       const coordinates = [boundary.map(([lat, lon]) => [lon, lat])];
       const intensity = maxValue > 0 ? cell.value / maxValue : 0;
       return {
-        type: "Feature",
+        type: "Feature" as const,
         geometry: {
-          type: "Polygon",
+          type: "Polygon" as const,
           coordinates
         },
         properties: {

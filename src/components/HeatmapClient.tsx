@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { db, type Trip } from "../lib/db";
 import { binPointsToH3, h3CellsToGeoJSON } from "../lib/h3";
+import type { GeoJsonFeatureCollection } from "../lib/geojsonTypes";
 import { getOrFetchSignal, type SignalMeta } from "../lib/signals";
 import { useNetworkStatus } from "../lib/useNetworkStatus";
 
@@ -75,12 +76,12 @@ const mapStyle: StyleSpecification = {
 
 export function HeatmapClient() {
   const [regionKey, setRegionKey] = useState<RegionKey>("timur");
-  const [internalGeoJson, setInternalGeoJson] = useState<GeoJSON.FeatureCollection>({
-    type: "FeatureCollection",
+  const [internalGeoJson, setInternalGeoJson] = useState<GeoJsonFeatureCollection>({
+    type: "FeatureCollection" as const,
     features: []
   });
-  const [poiGeoJson, setPoiGeoJson] = useState<GeoJSON.FeatureCollection>({
-    type: "FeatureCollection",
+  const [poiGeoJson, setPoiGeoJson] = useState<GeoJsonFeatureCollection>({
+    type: "FeatureCollection" as const,
     features: []
   });
   const [weather, setWeather] = useState<WeatherSummary | null>(null);
@@ -256,7 +257,11 @@ export function HeatmapClient() {
 
   async function loadSignals(forceRefresh: boolean) {
     if (!isOnline) {
-      setStatus("Offline. Menggunakan cache terakhir.");
+      setStatus(
+        forceRefresh
+          ? "Offline. Menampilkan cache terakhir (tanpa fetch)."
+          : "Offline. Menggunakan cache terakhir."
+      );
     } else {
       setStatus("Memuat sinyal POI & cuaca...");
     }
@@ -562,6 +567,9 @@ export function HeatmapClient() {
 function formatCacheLabel(label: string, meta: SignalMeta | null) {
   if (!meta || meta.ageSeconds === null) {
     return `${label}: belum ada cache`;
+  }
+  if (meta.isFresh && !meta.fromCache) {
+    return `${label}: fresh`;
   }
   const hours = (meta.ageSeconds / 3600).toFixed(1);
   return `${label}: cached ${hours} jam`;

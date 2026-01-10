@@ -2,7 +2,6 @@ import "../styles/globals.css";
 import type { Metadata, Viewport } from "next";
 import { Nav } from "../components/Nav";
 import { ServiceWorkerRegister } from "../components/ServiceWorkerRegister";
-import { UpdateToast } from "../components/UpdateToast";
 
 export const metadata: Metadata = {
   title: "PWA Maxim MVP",
@@ -32,7 +31,6 @@ export default function RootLayout({
           <div className="container">{children}</div>
         </main>
         <ServiceWorkerRegister />
-        <UpdateToast />
       </body>
     </html>
   );
