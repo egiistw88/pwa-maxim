@@ -1,34 +1,29 @@
-import { db, type Settings } from "./db";
-import { defaultWeights } from "./engine/scoring";
-
-const DEFAULT_SETTINGS: Settings = {
-  id: "default",
-  costPerKm: 250,
-  avgSpeedKmh: 22,
-  explorationRate: 0.08,
-  preferredH3Res: 10,
-  weights: defaultWeights()
-};
+import { db, defaultSettings, normalizeSettings, type Settings } from "./db";
 
 export async function getSettings() {
   const existing = await db.settings.get("default");
   if (existing) {
-    return existing;
+    const normalized = normalizeSettings(existing);
+    if (JSON.stringify(existing) !== JSON.stringify(normalized)) {
+      await db.settings.put(normalized);
+    }
+    return normalized;
   }
-  await db.settings.put(DEFAULT_SETTINGS);
-  return DEFAULT_SETTINGS;
+  const normalized = normalizeSettings(defaultSettings);
+  await db.settings.put(normalized);
+  return normalized;
 }
 
 export async function updateSettings(partial: Partial<Settings>) {
   const current = await getSettings();
-  const next: Settings = {
+  const next = normalizeSettings({
     ...current,
     ...partial,
     weights: {
       ...current.weights,
       ...(partial.weights ?? {})
     }
-  };
+  });
   await db.settings.put(next);
   return next;
 }

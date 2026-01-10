@@ -1,4 +1,5 @@
 import Dexie, { type Table } from "dexie";
+import { defaultWeights } from "./engine/scoring";
 
 export type Trip = {
   id: string;
@@ -25,14 +26,17 @@ export type WalletTx = {
 export type Settings = {
   id: "default";
   dailyTargetNet: number;
-  dailyTargetGross?: number | null;
-  costPerKmEstimate?: number | null;
+  dailyTargetGross: number | null;
+  costPerKmEstimate: number | null;
   costPerKmEstimateMethod: "fuel-only" | "all-expense" | "manual";
   fuelCategoryName: string;
   distanceMode: "trip-only" | "trip+deadhead";
-  manualCostPerKm?: number | null;
-  costPerKm?: number;
-  preferredH3Res?: number | null;
+  manualCostPerKm: number | null;
+  costPerKm: number;
+  avgSpeedKmh: number;
+  explorationRate: number;
+  preferredH3Res: number;
+  weights: Record<string, number>;
 };
 
 export const defaultSettings: Settings = {
@@ -45,7 +49,10 @@ export const defaultSettings: Settings = {
   distanceMode: "trip-only",
   manualCostPerKm: null,
   costPerKm: 250,
-  preferredH3Res: null
+  avgSpeedKmh: 22,
+  explorationRate: 0.08,
+  preferredH3Res: 10,
+  weights: defaultWeights()
 };
 
 export type SignalCache = {
@@ -56,14 +63,24 @@ export type SignalCache = {
   lastErrorAt?: string | null;
 };
 
-export type Settings = {
-  id: "default";
-  costPerKm: number;
-  avgSpeedKmh: number;
-  explorationRate: number;
-  preferredH3Res: number;
-  weights: Record<string, number>;
-};
+export function normalizeSettings(settings?: Partial<Settings>): Settings {
+  const merged: Settings = {
+    ...defaultSettings,
+    ...settings,
+    id: "default",
+    weights: {
+      ...defaultSettings.weights,
+      ...(settings?.weights ?? {})
+    }
+  };
+
+  const costPerKm = merged.costPerKmEstimate ?? merged.manualCostPerKm ?? 250;
+
+  return {
+    ...merged,
+    costPerKm
+  };
+}
 
 export type RecommendationEvent = {
   id: string;
@@ -104,17 +121,27 @@ class AppDB extends Dexie {
       .upgrade(async (tx) => {
         const table = tx.table<Settings, string>("settings");
         const existing = await table.get("default");
-        if (!existing) {
-          await table.put(defaultSettings);
+        const normalized = normalizeSettings(existing ?? undefined);
+        if (!existing || JSON.stringify(existing) !== JSON.stringify(normalized)) {
+          await table.put(normalized);
         }
       });
-    this.version(2).stores({
-      trips: "id, startedAt, endedAt",
-      wallet_tx: "id, createdAt, type",
-      signal_cache: "key, fetchedAt",
-      settings: "id",
-      rec_events: "id, createdAt, areaKey"
-    });
+    this.version(3)
+      .stores({
+        trips: "id, startedAt, endedAt",
+        wallet_tx: "id, createdAt, type",
+        signal_cache: "key, fetchedAt",
+        settings: "id",
+        rec_events: "id, createdAt, areaKey"
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table<Settings, string>("settings");
+        const existing = await table.get("default");
+        const normalized = normalizeSettings(existing ?? undefined);
+        if (!existing || JSON.stringify(existing) !== JSON.stringify(normalized)) {
+          await table.put(normalized);
+        }
+      });
   }
 }
 
