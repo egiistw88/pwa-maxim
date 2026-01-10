@@ -17,7 +17,7 @@ type SpeechRecognition = {
   lang: string;
   interimResults: boolean;
   maxAlternatives: number;
-  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
   onend: (() => void) | null;
   onerror: (() => void) | null;
   start: () => void;
