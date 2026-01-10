@@ -14,6 +14,25 @@ export type Trip = {
   source: "manual" | "assistant";
 };
 
+export type DraftTrip = {
+  id: "active";
+  startedAt: string;
+  startLat: number | null;
+  startLon: number | null;
+  sessionId: string | null;
+  areaKey: string | null;
+  predictedScoreAtStart: number | null;
+  locationUnavailable: boolean;
+};
+
+export type Session = {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+  status: "working" | "rest";
+  baseAreaKey: string;
+};
+
 export type WalletTx = {
   id: string;
   createdAt: string;
@@ -37,6 +56,7 @@ export type Settings = {
   explorationRate: number;
   preferredH3Res: number;
   weights: Record<string, number>;
+  baseAreaKey: string;
 };
 
 export const defaultSettings: Settings = {
@@ -52,7 +72,8 @@ export const defaultSettings: Settings = {
   avgSpeedKmh: 22,
   explorationRate: 0.08,
   preferredH3Res: 10,
-  weights: defaultWeights()
+  weights: defaultWeights(),
+  baseAreaKey: "timur"
 };
 
 export type SignalCache = {
@@ -99,6 +120,8 @@ export type RecommendationEvent = {
 
 class AppDB extends Dexie {
   trips!: Table<Trip, string>;
+  drafts!: Table<DraftTrip, string>;
+  sessions!: Table<Session, string>;
   wallet_tx!: Table<WalletTx, string>;
   signal_cache!: Table<SignalCache, string>;
   settings!: Table<Settings, string>;
@@ -129,6 +152,24 @@ class AppDB extends Dexie {
     this.version(3)
       .stores({
         trips: "id, startedAt, endedAt",
+        wallet_tx: "id, createdAt, type",
+        signal_cache: "key, fetchedAt",
+        settings: "id",
+        rec_events: "id, createdAt, areaKey"
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table<Settings, string>("settings");
+        const existing = await table.get("default");
+        const normalized = normalizeSettings(existing ?? undefined);
+        if (!existing || JSON.stringify(existing) !== JSON.stringify(normalized)) {
+          await table.put(normalized);
+        }
+      });
+    this.version(4)
+      .stores({
+        trips: "id, startedAt, endedAt",
+        drafts: "id, startedAt, sessionId",
+        sessions: "id, startedAt, endedAt, status",
         wallet_tx: "id, createdAt, type",
         signal_cache: "key, fetchedAt",
         settings: "id",

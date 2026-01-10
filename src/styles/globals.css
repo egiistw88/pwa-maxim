@@ -214,3 +214,232 @@ button.ghost {
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.25);
   z-index: 50;
 }
+
+body.drive-body {
+  background: #05070d;
+  color: #f8fafc;
+}
+
+body.drive-body .nav {
+  background: #0b0f19;
+  border-bottom-color: #1f2937;
+}
+
+body.drive-body .tab {
+  color: #cbd5f5;
+}
+
+body.drive-body .tab.active {
+  background: #1d263a;
+  color: #f8fafc;
+  border-color: #334155;
+}
+
+.drive-mode {
+  min-height: calc(100vh - 140px);
+  background: #0b0f19;
+  border-radius: 16px;
+  padding: 20px;
+  display: grid;
+  gap: 20px;
+  color: #f8fafc;
+}
+
+.drive-status {
+  display: grid;
+  gap: 12px;
+}
+
+.drive-status-label {
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.drive-status-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.drive-actions {
+  display: grid;
+  gap: 14px;
+}
+
+.drive-button {
+  min-height: 76px;
+  border-radius: 14px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.drive-button.start {
+  background: #16a34a;
+}
+
+.drive-button.end {
+  background: #dc2626;
+}
+
+.drive-button.recommend {
+  background: #2563eb;
+}
+
+.drive-button.nav {
+  background: #0f172a;
+  border: 1px solid #334155;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+}
+
+.drive-button.ghost {
+  background: transparent;
+  border: 1px solid #334155;
+  color: #f8fafc;
+  min-height: 52px;
+}
+
+.drive-warning {
+  font-size: 0.85rem;
+  color: #fbbf24;
+  text-align: center;
+}
+
+.drive-recommendations {
+  display: grid;
+  gap: 12px;
+}
+
+.drive-section-title {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.drive-muted {
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
+.drive-card-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.drive-card {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 16px;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.drive-card ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #cbd5f5;
+}
+
+.drive-card-title {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.drive-score {
+  font-size: 0.9rem;
+  color: #38bdf8;
+}
+
+.drive-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1f2937;
+  color: #f8fafc;
+  padding: 14px 20px;
+  border-radius: 999px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  z-index: 60;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.35);
+}
+
+.drive-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 70;
+}
+
+.drive-modal {
+  background: #0f172a;
+  border: 1px solid #1f2937;
+  border-radius: 16px;
+  padding: 20px;
+  width: 100%;
+  max-width: 420px;
+  display: grid;
+  gap: 16px;
+}
+
+.drive-modal-actions {
+  display: grid;
+  gap: 12px;
+}
+
+.drive-earnings-display {
+  background: #111827;
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 1.6rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.drive-numpad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.drive-numpad-btn {
+  min-height: 56px;
+  border-radius: 12px;
+  background: #1f2937;
+  color: #f8fafc;
+  font-size: 1.2rem;
+  font-weight: 700;
+  border: 1px solid #334155;
+}
+
+.drive-numpad-btn.secondary {
+  background: #0b1020;
+}
+
+.drive-voice textarea {
+  background: #0b1020;
+  border-color: #1f2937;
+  color: #f8fafc;
+}
+
+.drive-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: #cbd5f5;
+}
+
+.drive-voice-row {
+  display: grid;
+  gap: 10px;
+}
