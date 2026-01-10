@@ -2,15 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { db, type Session, type Trip, type WalletTx } from "../lib/db";
-import { haversineKm } from "../lib/geo";
+import { hasTripCoords, haversineKm } from "../lib/geo";
 import { computeActiveMinutes } from "../lib/session";
 import { useLiveQueryState } from "../lib/useLiveQueryState";
 
 const formatCurrency = (value: number) => `Rp ${value.toLocaleString("id-ID")}`;
-
-function isValidCoord(value: number | null | undefined): value is number {
-  return Number.isFinite(value ?? NaN);
-}
 
 function downloadCsv(filename: string, header: string[], rows: Array<Array<string | number>>) {
   const escapeValue = (value: string | number) => {
@@ -93,12 +89,7 @@ export function SessionReportClient() {
     const net = gross - expense;
     let distanceKm = 0;
     for (const trip of sessionTrips) {
-      if (
-        isValidCoord(trip.startLat) &&
-        isValidCoord(trip.startLon) &&
-        isValidCoord(trip.endLat) &&
-        isValidCoord(trip.endLon)
-      ) {
+      if (hasTripCoords(trip)) {
         distanceKm += haversineKm(trip.startLat, trip.startLon, trip.endLat, trip.endLon);
       }
     }
@@ -139,13 +130,9 @@ export function SessionReportClient() {
     ];
     const rows: Array<Array<string | number>> = [];
     sessionTrips.forEach((trip) => {
-      const distanceKm =
-        isValidCoord(trip.startLat) &&
-        isValidCoord(trip.startLon) &&
-        isValidCoord(trip.endLat) &&
-        isValidCoord(trip.endLon)
-          ? haversineKm(trip.startLat, trip.startLon, trip.endLat, trip.endLon)
-          : 0;
+      const distanceKm = hasTripCoords(trip)
+        ? haversineKm(trip.startLat, trip.startLon, trip.endLat, trip.endLon)
+        : 0;
       rows.push([
         "trip",
         trip.startedAt,

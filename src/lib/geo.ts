@@ -1,5 +1,23 @@
 const EARTH_RADIUS_KM = 6371;
 
+export function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+export function hasTripCoords(trip: {
+  startLat?: number | null;
+  startLon?: number | null;
+  endLat?: number | null;
+  endLon?: number | null;
+}): trip is { startLat: number; startLon: number; endLat: number; endLon: number } {
+  return (
+    isFiniteNumber(trip.startLat) &&
+    isFiniteNumber(trip.startLon) &&
+    isFiniteNumber(trip.endLat) &&
+    isFiniteNumber(trip.endLon)
+  );
+}
+
 export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const toRad = (value: number) => (value * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);

@@ -12,7 +12,7 @@ import {
   type Trip,
   type WalletTx
 } from "../lib/db";
-import { haversineKm } from "../lib/geo";
+import { hasTripCoords, haversineKm, isFiniteNumber } from "../lib/geo";
 import { attachToActiveSession, computeActiveMinutes } from "../lib/session";
 import { dailySummary, rangeSummary, sumByCategory } from "../lib/walletAnalytics";
 import { getSettings } from "../lib/settings";
@@ -206,34 +206,28 @@ export function WalletClient() {
       })
       .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
 
-    const isValidCoord = (value: number | null): value is number =>
-      Number.isFinite(value ?? NaN);
-
     let distanceKm = 0;
     let lastTripForDeadhead: Trip | null = null;
 
     for (const trip of rangeTrips) {
-      const hasTripCoords =
-        isValidCoord(trip.startLat) &&
-        isValidCoord(trip.startLon) &&
-        isValidCoord(trip.endLat) &&
-        isValidCoord(trip.endLon);
-
-      if (hasTripCoords) {
+      const tripHasCoords = hasTripCoords(trip);
+      if (tripHasCoords) {
         distanceKm += haversineKm(trip.startLat, trip.startLon, trip.endLat, trip.endLon);
       }
 
       if (settings.distanceMode === "trip+deadhead") {
-        const hasStartCoords = isValidCoord(trip.startLat) && isValidCoord(trip.startLon);
-        if (lastTripForDeadhead && hasStartCoords) {
-          distanceKm += haversineKm(
-            lastTripForDeadhead.endLat,
-            lastTripForDeadhead.endLon,
-            trip.startLat,
-            trip.startLon
-          );
+        if (
+          lastTripForDeadhead &&
+          isFiniteNumber(trip.startLat) &&
+          isFiniteNumber(trip.startLon) &&
+          isFiniteNumber(lastTripForDeadhead.endLat) &&
+          isFiniteNumber(lastTripForDeadhead.endLon)
+        ) {
+          const { startLat, startLon } = trip;
+          const { endLat, endLon } = lastTripForDeadhead;
+          distanceKm += haversineKm(endLat, endLon, startLat, startLon);
         }
-        if (isValidCoord(trip.endLat) && isValidCoord(trip.endLon)) {
+        if (isFiniteNumber(trip.endLat) && isFiniteNumber(trip.endLon)) {
           lastTripForDeadhead = trip;
         }
       }
