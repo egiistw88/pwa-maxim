@@ -94,6 +94,20 @@ class AppDB extends Dexie {
       wallet_tx: "id, createdAt, type",
       signal_cache: "key, fetchedAt"
     });
+    this.version(2)
+      .stores({
+        trips: "id, startedAt, endedAt",
+        wallet_tx: "id, createdAt, type",
+        signal_cache: "key, fetchedAt",
+        settings: "id"
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table<Settings, string>("settings");
+        const existing = await table.get("default");
+        if (!existing) {
+          await table.put(defaultSettings);
+        }
+      });
     this.version(2).stores({
       trips: "id, startedAt, endedAt",
       wallet_tx: "id, createdAt, type",
