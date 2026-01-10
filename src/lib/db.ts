@@ -12,6 +12,7 @@ export type Trip = {
   earnings: number;
   note?: string;
   source: "manual" | "assistant";
+  sessionId?: string;
 };
 
 export type DraftTrip = {
@@ -40,6 +41,7 @@ export type WalletTx = {
   amount: number;
   category: string;
   note?: string;
+  sessionId?: string;
 };
 
 export type Settings = {
@@ -56,6 +58,8 @@ export type Settings = {
   explorationRate: number;
   preferredH3Res: number;
   weights: Record<string, number>;
+  autoAttachToActiveSession: boolean;
+  defaultBreakMinutes: number;
   baseAreaKey: string;
 };
 
@@ -73,6 +77,8 @@ export const defaultSettings: Settings = {
   explorationRate: 0.08,
   preferredH3Res: 10,
   weights: defaultWeights(),
+  autoAttachToActiveSession: true,
+  defaultBreakMinutes: 30,
   baseAreaKey: "timur"
 };
 
@@ -118,6 +124,32 @@ export type RecommendationEvent = {
   followed?: boolean | null;
 };
 
+export type SessionPause = {
+  startAt: string;
+  endAt: string | null;
+};
+
+export type Session = {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+  status: "active" | "paused" | "ended";
+  pauses: SessionPause[];
+  note?: string | null;
+  baseAreaKey?: string | null;
+  startLat?: number | null;
+  startLon?: number | null;
+  endLat?: number | null;
+  endLon?: number | null;
+  totalsSnapshot?: {
+    gross: number;
+    expense: number;
+    net: number;
+    tripsCount: number;
+    distanceKm: number;
+  };
+};
+
 class AppDB extends Dexie {
   trips!: Table<Trip, string>;
   drafts!: Table<DraftTrip, string>;
@@ -126,6 +158,7 @@ class AppDB extends Dexie {
   signal_cache!: Table<SignalCache, string>;
   settings!: Table<Settings, string>;
   rec_events!: Table<RecommendationEvent, string>;
+  sessions!: Table<Session, string>;
 
   constructor() {
     super("pwa_maxim_db");
@@ -174,6 +207,11 @@ class AppDB extends Dexie {
         signal_cache: "key, fetchedAt",
         settings: "id",
         rec_events: "id, createdAt, areaKey"
+        wallet_tx: "id, createdAt, type",
+        signal_cache: "key, fetchedAt",
+        settings: "id",
+        rec_events: "id, createdAt, areaKey",
+        sessions: "id, startedAt, endedAt, status"
       })
       .upgrade(async (tx) => {
         const table = tx.table<Settings, string>("settings");

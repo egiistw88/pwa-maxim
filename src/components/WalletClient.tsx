@@ -3,8 +3,9 @@
 import { nanoid } from "nanoid";
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
-import { db, defaultSettings, normalizeSettings, type Settings, type Trip, type WalletTx } from "../lib/db";
+import { db, defaultSettings, normalizeSettings, type Session, type Settings, type Trip, type WalletTx } from "../lib/db";
 import { haversineKm } from "../lib/geo";
+import { attachToActiveSession, computeActiveMinutes } from "../lib/session";
 import { dailySummary, rangeSummary, sumByCategory } from "../lib/walletAnalytics";
 
 const walletSchema = z.object({
@@ -25,6 +26,9 @@ export function WalletClient() {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [status, setStatus] = useState<string | null>(null);
   const [estimateDays, setEstimateDays] = useState(7);
+  const [activeSession, setActiveSession] = useState<Session | null>(null);
+  const [sessionActiveMinutes, setSessionActiveMinutes] = useState<number | null>(null);
+  const [summaryMode, setSummaryMode] = useState<"today" | "session">("today");
 
   const [formType, setFormType] = useState<"income" | "expense">("income");
   const [formAmount, setFormAmount] = useState("0");
@@ -37,9 +41,52 @@ export function WalletClient() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+    const loadSession = async () => {
+      const sessions = await db.sessions.where("status").anyOf("active", "paused").toArray();
+      if (!mounted) {
+        return;
+      }
+      if (sessions.length === 0) {
+        setActiveSession(null);
+        return;
+      }
+      const latest = sessions.sort(
+        (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+      )[0];
+      setActiveSession(latest ?? null);
+    };
+    void loadSession();
+    const interval = window.setInterval(loadSession, 60_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeSession) {
+      setSessionActiveMinutes(null);
+      return;
+    }
+    const updateMinutes = () => {
+      setSessionActiveMinutes(computeActiveMinutes(activeSession, new Date()));
+    };
+    updateMinutes();
+    const interval = window.setInterval(updateMinutes, 1000);
+    return () => window.clearInterval(interval);
+  }, [activeSession]);
+
+  useEffect(() => {
     const defaultCategory = formType === "income" ? "Order" : "BBM";
     setFormCategory(defaultCategory);
   }, [formType]);
+
+  useEffect(() => {
+    if (!activeSession) {
+      setSummaryMode("today");
+    }
+  }, [activeSession]);
 
   async function loadData() {
     const [txs, storedTrips, storedSettings] = await Promise.all([
@@ -87,7 +134,8 @@ export function WalletClient() {
       note: parsed.data.note
     };
 
-    await db.wallet_tx.add(tx);
+    const txWithSession = await attachToActiveSession(tx);
+    await db.wallet_tx.add(txWithSession);
     setFormAmount("0");
     setFormNote("");
     setFormType("income");
@@ -104,6 +152,37 @@ export function WalletClient() {
   }
 
   const todaySummary = useMemo(() => dailySummary(transactions, new Date()), [transactions]);
+  const sessionTransactions = useMemo(
+    () => (activeSession ? transactions.filter((tx) => tx.sessionId === activeSession.id) : []),
+    [activeSession, transactions]
+  );
+  const sessionSummary = useMemo(() => {
+    if (!activeSession) {
+      return null;
+    }
+    const income = sessionTransactions
+      .filter((tx) => tx.type === "income")
+      .reduce((sum, tx) => sum + tx.amount, 0);
+    const expense = sessionTransactions
+      .filter((tx) => tx.type === "expense")
+      .reduce((sum, tx) => sum + tx.amount, 0);
+    const byCategory = sessionTransactions
+      .filter((tx) => tx.type === "expense")
+      .reduce<Record<string, number>>((acc, tx) => {
+        acc[tx.category] = (acc[tx.category] ?? 0) + tx.amount;
+        return acc;
+      }, {});
+    const categoryList = Object.entries(byCategory)
+      .map(([category, amount]) => ({ category, amount }))
+      .sort((a, b) => b.amount - a.amount);
+    return {
+      income,
+      expense,
+      net: income - expense,
+      byCategory: categoryList,
+      topExpenseCategory: categoryList[0] ?? null
+    };
+  }, [activeSession, sessionTransactions]);
   const weekSummary = useMemo(() => rangeSummary(transactions, 7), [transactions]);
   const monthSummary = useMemo(() => rangeSummary(transactions, 30), [transactions]);
 
@@ -190,10 +269,12 @@ export function WalletClient() {
   const targetNet = settings.dailyTargetNet;
   const targetGross = settings.dailyTargetGross ?? null;
 
-  const progress = Math.min(netToday / Math.max(targetNet, 1), 1);
-  const remainingTarget = Math.max(targetNet - netToday, 0);
+  const netForTarget = activeSession && sessionSummary ? sessionSummary.net : netToday;
+  const grossForTarget = activeSession && sessionSummary ? sessionSummary.income : grossToday;
+  const progress = Math.min(netForTarget / Math.max(targetNet, 1), 1);
+  const remainingTarget = Math.max(targetNet - netForTarget, 0);
 
-  const activeHours = useMemo(() => {
+  const fallbackActiveHours = useMemo(() => {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const endOfToday = new Date();
@@ -237,11 +318,15 @@ export function WalletClient() {
     return (nowTime - firstTxTime) / 3_600_000;
   }, [trips, transactions]);
 
-  const netPerActiveHour = activeHours ? netToday / Math.max(activeHours, 1) : null;
+  const activeHours = activeSession && sessionActiveMinutes !== null
+    ? sessionActiveMinutes / 60
+    : fallbackActiveHours;
+  const netPerActiveHour = activeHours ? netForTarget / Math.max(activeHours, 1) : null;
+  const remainingHoursToTarget =
+    netPerActiveHour && netPerActiveHour > 0
+      ? remainingTarget / Math.max(netPerActiveHour, 1)
+      : null;
   const now = new Date();
-  const remainingHours = activeHours
-    ? Math.max(24 - (now.getHours() + now.getMinutes() / 60), 0)
-    : null;
 
   const fuelExpenseToday = todaySummary.byCategory.find(
     (item) => item.category === settings.fuelCategoryName
@@ -250,7 +335,7 @@ export function WalletClient() {
     ? Math.round((fuelExpenseToday / grossToday) * 100)
     : null;
 
-  const behindTarget = netToday < targetNet * 0.5 && now.getHours() >= 14;
+  const behindTarget = netForTarget < targetNet * 0.5 && now.getHours() >= 14;
 
   const categoryBreakdownWeek = weekSummary.byCategory;
   const categoryBreakdownMonth = monthSummary.byCategory;
@@ -346,16 +431,51 @@ export function WalletClient() {
 
       <div className="card grid three">
         <div>
-          <h4>Hari Ini</h4>
-          <p className="helper-text">Income: {formatCurrency(todaySummary.income)}</p>
-          <p className="helper-text">Expense: {formatCurrency(todaySummary.expense)}</p>
-          <p>
-            <strong>Net: {formatCurrency(todaySummary.net)}</strong>
+          <div className="form-row" style={{ justifyContent: "space-between" }}>
+            <h4>Hari Ini</h4>
+            <div className="form-row">
+              <button
+                type="button"
+                className={summaryMode === "today" ? "secondary" : "ghost"}
+                onClick={() => setSummaryMode("today")}
+              >
+                Semua hari ini
+              </button>
+              <button
+                type="button"
+                className={summaryMode === "session" ? "secondary" : "ghost"}
+                onClick={() => setSummaryMode("session")}
+                disabled={!activeSession}
+              >
+                Sesi aktif
+              </button>
+            </div>
+          </div>
+          <p className="helper-text">
+            Income:{" "}
+            {formatCurrency(summaryMode === "session" && sessionSummary
+              ? sessionSummary.income
+              : todaySummary.income)}
           </p>
-          {todaySummary.topExpenseCategory && (
+          <p className="helper-text">
+            Expense:{" "}
+            {formatCurrency(summaryMode === "session" && sessionSummary
+              ? sessionSummary.expense
+              : todaySummary.expense)}
+          </p>
+          <p>
+            <strong>
+              Net:{" "}
+              {formatCurrency(summaryMode === "session" && sessionSummary
+                ? sessionSummary.net
+                : todaySummary.net)}
+            </strong>
+          </p>
+          {(summaryMode === "session" ? sessionSummary?.topExpenseCategory : todaySummary.topExpenseCategory) && (
             <p className="helper-text">
-              Top expense: {todaySummary.topExpenseCategory.category} (
-              {formatCurrency(todaySummary.topExpenseCategory.amount)})
+              Top expense:{" "}
+              {(summaryMode === "session" ? sessionSummary?.topExpenseCategory : todaySummary.topExpenseCategory)?.category}{" "}
+              ({formatCurrency((summaryMode === "session" ? sessionSummary?.topExpenseCategory : todaySummary.topExpenseCategory)?.amount ?? 0)})
             </p>
           )}
         </div>
@@ -442,26 +562,31 @@ export function WalletClient() {
                 }}
               />
             </div>
-            <p className="helper-text">Net hari ini: {formatCurrency(netToday)}</p>
+            <p className="helper-text">
+              Net {activeSession ? "sesi" : "hari ini"}: {formatCurrency(netForTarget)}
+            </p>
             <p>
               <strong>Sisa target: {formatCurrency(remainingTarget)}</strong>
             </p>
             {targetGross ? (
-              <p className="helper-text">Target kotor: {formatCurrency(targetGross)}</p>
+              <p className="helper-text">
+                Target kotor: {formatCurrency(targetGross)} • Gross saat ini:{" "}
+                {formatCurrency(grossForTarget)}
+              </p>
             ) : null}
           </div>
           <div>
             <p className="helper-text">
-              Jam aktif hari ini: {activeHours ? activeHours.toFixed(1) : "N/A"}
+              Jam aktif {activeSession ? "sesi" : "hari ini"}:{" "}
+              {activeHours ? activeHours.toFixed(1) : "N/A"}
             </p>
             <p className="helper-text">
               Net per jam aktif: {netPerActiveHour ? formatCurrency(netPerActiveHour) : "N/A"}
             </p>
-            {activeHours && remainingHours !== null ? (
+            {activeHours && remainingHoursToTarget !== null ? (
               <p className="helper-text">
-                Jika ingin tembus target, butuh rata-rata{` `}
-                {formatCurrency(remainingTarget / Math.max(remainingHours, 1))}/jam untuk sisa{` `}
-                {remainingHours.toFixed(1)} jam.
+                Estimasi sisa jam hingga target: {remainingHoursToTarget.toFixed(1)} jam
+                (informasi, bukan jaminan).
               </p>
             ) : (
               <p className="helper-text">Belum ada durasi trip yang bisa dihitung.</p>
@@ -668,8 +793,15 @@ export function WalletClient() {
 }
 
 function downloadWalletCsv(transactions: WalletTx[]) {
-  const header = ["createdAt", "type", "amount", "category", "note"];
-  const rows = transactions.map((tx) => [tx.createdAt, tx.type, tx.amount, tx.category, tx.note ?? ""]);
+  const header = ["createdAt", "type", "amount", "category", "note", "sessionId"];
+  const rows = transactions.map((tx) => [
+    tx.createdAt,
+    tx.type,
+    tx.amount,
+    tx.category,
+    tx.note ?? "",
+    tx.sessionId ?? ""
+  ]);
   downloadCsv("wallet.csv", header, rows);
 }
 
@@ -682,7 +814,8 @@ function downloadTripsCsv(trips: Trip[]) {
     "endLat",
     "endLon",
     "earnings",
-    "note"
+    "note",
+    "sessionId"
   ];
   const rows = trips.map((trip) => [
     trip.startedAt,
@@ -692,7 +825,8 @@ function downloadTripsCsv(trips: Trip[]) {
     trip.endLat,
     trip.endLon,
     trip.earnings,
-    trip.note ?? ""
+    trip.note ?? "",
+    trip.sessionId ?? ""
   ]);
   downloadCsv("trips.csv", header, rows);
 }

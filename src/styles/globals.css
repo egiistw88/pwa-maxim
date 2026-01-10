@@ -187,6 +187,11 @@ button.ghost {
   background: #fff;
 }
 
+.list-item.active {
+  border-color: #1f6feb;
+  background: #eef2ff;
+}
+
 .legend {
   display: flex;
   align-items: center;

@@ -7,6 +7,8 @@ const tabs = [
   { href: "/heatmap", label: "Heatmap" },
   { href: "/drive", label: "Drive" },
   { href: "/wallet", label: "Dompet" }
+  { href: "/wallet", label: "Dompet" },
+  { href: "/session", label: "Sesi" }
 ];
 
 export function Nav() {
