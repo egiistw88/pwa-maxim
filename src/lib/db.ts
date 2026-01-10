@@ -32,6 +32,7 @@ export type Settings = {
   distanceMode: "trip-only" | "trip+deadhead";
   manualCostPerKm?: number | null;
   costPerKm?: number;
+  preferredH3Res?: number | null;
 };
 
 export const defaultSettings: Settings = {
@@ -43,7 +44,8 @@ export const defaultSettings: Settings = {
   fuelCategoryName: "BBM",
   distanceMode: "trip-only",
   manualCostPerKm: null,
-  costPerKm: 250
+  costPerKm: 250,
+  preferredH3Res: null
 };
 
 export type SignalCache = {
