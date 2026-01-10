@@ -6,7 +6,7 @@ const RUNTIME_CACHE = `runtime-${VERSION}`;
 const API_CACHE = `api-${VERSION}`;
 const TILE_CACHE = `tiles-${VERSION}`;
 
-const TILE_MAX_ENTRIES = 80;
+const TILE_MAX_ENTRIES = 300;
 const TILE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 
 self.addEventListener("install", (event) => {

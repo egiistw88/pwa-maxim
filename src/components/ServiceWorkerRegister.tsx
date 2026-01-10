@@ -1,18 +1,14 @@
 "use client";
 
-import { useEffect } from "react";
-
-const UPDATE_EVENT = "sw:update";
+import { useEffect, useState } from "react";
 
 export function ServiceWorkerRegister() {
+  const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
+
   useEffect(() => {
     if (!("serviceWorker" in navigator)) {
       return;
     }
-
-    const notifyUpdate = (registration: ServiceWorkerRegistration) => {
-      window.dispatchEvent(new CustomEvent(UPDATE_EVENT, { detail: registration }));
-    };
 
     const handleControllerChange = () => {
       window.location.reload();
@@ -22,19 +18,19 @@ export function ServiceWorkerRegister() {
 
     navigator.serviceWorker
       .register("/sw.js")
-      .then((registration) => {
-        if (registration.waiting) {
-          notifyUpdate(registration);
+      .then((registrationInstance) => {
+        if (registrationInstance.waiting) {
+          setRegistration(registrationInstance);
         }
 
-        registration.addEventListener("updatefound", () => {
-          const newWorker = registration.installing;
+        registrationInstance.addEventListener("updatefound", () => {
+          const newWorker = registrationInstance.installing;
           if (!newWorker) {
             return;
           }
           newWorker.addEventListener("statechange", () => {
             if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-              notifyUpdate(registration);
+              setRegistration(registrationInstance);
             }
           });
         });
@@ -48,5 +44,22 @@ export function ServiceWorkerRegister() {
     };
   }, []);
 
-  return null;
+  if (!registration) {
+    return null;
+  }
+
+  return (
+    <div className="update-toast">
+      <span>Update tersedia.</span>
+      <button
+        type="button"
+        className="secondary"
+        onClick={() => {
+          registration.waiting?.postMessage({ type: "SKIP_WAITING" });
+        }}
+      >
+        Reload
+      </button>
+    </div>
+  );
 }

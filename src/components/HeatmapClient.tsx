@@ -256,7 +256,11 @@ export function HeatmapClient() {
 
   async function loadSignals(forceRefresh: boolean) {
     if (!isOnline) {
-      setStatus("Offline. Menggunakan cache terakhir.");
+      setStatus(
+        forceRefresh
+          ? "Offline. Menampilkan cache terakhir (tanpa fetch)."
+          : "Offline. Menggunakan cache terakhir."
+      );
     } else {
       setStatus("Memuat sinyal POI & cuaca...");
     }
@@ -562,6 +566,9 @@ export function HeatmapClient() {
 function formatCacheLabel(label: string, meta: SignalMeta | null) {
   if (!meta || meta.ageSeconds === null) {
     return `${label}: belum ada cache`;
+  }
+  if (meta.isFresh && !meta.fromCache) {
+    return `${label}: fresh`;
   }
   const hours = (meta.ageSeconds / 3600).toFixed(1);
   return `${label}: cached ${hours} jam`;
