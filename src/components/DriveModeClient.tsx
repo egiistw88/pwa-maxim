@@ -115,7 +115,7 @@ export function DriveModeClient() {
       const [loadedSettings, activeDraft, session, storedTrips] = await Promise.all([
         getSettings(),
         db.drafts.get("active"),
-        db.sessions.where("endedAt").equals(null).last(),
+        db.sessions.filter((entry) => entry.endedAt === null).last(),
         db.trips.orderBy("startedAt").reverse().toArray()
       ]);
       setSettings(loadedSettings);
