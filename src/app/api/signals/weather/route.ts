@@ -8,6 +8,10 @@ const paramSchema = z.object({
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
+  const cacheHeaders = {
+    "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400"
+  };
+  const errorHeaders = { "Cache-Control": "no-store" };
   const parsed = paramSchema.safeParse({
     lat: url.searchParams.get("lat"),
     lon: url.searchParams.get("lon")
@@ -16,7 +20,7 @@ export async function GET(request: Request) {
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.flatten().formErrors.join(", ") },
-      { status: 400 }
+      { status: 400, headers: errorHeaders }
     );
   }
 
@@ -39,7 +43,7 @@ export async function GET(request: Request) {
     if (!response.ok) {
       return NextResponse.json(
         { error: `Open-Meteo gagal: ${response.status}` },
-        { status: 502 }
+        { status: 502, headers: errorHeaders }
       );
     }
 
@@ -52,13 +56,16 @@ export async function GET(request: Request) {
       precipitationProbability: data.hourly.precipitation_probability[index] ?? 0
     }));
 
-    return NextResponse.json({
-      hourly: next24
-    });
+    return NextResponse.json(
+      {
+        hourly: next24
+      },
+      { headers: cacheHeaders }
+    );
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Open-Meteo error" },
-      { status: 500 }
+      { status: 500, headers: errorHeaders }
     );
   } finally {
     clearTimeout(timeout);

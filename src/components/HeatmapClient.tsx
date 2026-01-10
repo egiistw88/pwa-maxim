@@ -2,13 +2,14 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
+import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from "maplibre-gl";
 import { nanoid } from "nanoid";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { db, type Trip } from "../lib/db";
 import { binPointsToH3, h3CellsToGeoJSON } from "../lib/h3";
-import { getOrFetchSignal } from "../lib/signals";
+import { getOrFetchSignal, type SignalMeta } from "../lib/signals";
+import { useNetworkStatus } from "../lib/useNetworkStatus";
 
 const regions = {
   timur: {
@@ -53,7 +54,7 @@ const tripSchema = z.object({
 const H3_RESOLUTION = 9;
 const CACHE_TTL = 6 * 60 * 60;
 
-const mapStyle = {
+const mapStyle: StyleSpecification = {
   version: 8,
   sources: {
     osm: {
@@ -70,7 +71,7 @@ const mapStyle = {
       source: "osm"
     }
   ]
-} as const;
+};
 
 export function HeatmapClient() {
   const [regionKey, setRegionKey] = useState<RegionKey>("timur");
@@ -88,6 +89,10 @@ export function HeatmapClient() {
   const [rainEnabled, setRainEnabled] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
+  const [poiMeta, setPoiMeta] = useState<SignalMeta | null>(null);
+  const [weatherMeta, setWeatherMeta] = useState<SignalMeta | null>(null);
+
+  const { isOnline } = useNetworkStatus();
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -250,11 +255,15 @@ export function HeatmapClient() {
   }
 
   async function loadSignals(forceRefresh: boolean) {
-    setStatus("Memuat sinyal POI & cuaca...");
+    if (!isOnline) {
+      setStatus("Offline. Menggunakan cache terakhir.");
+    } else {
+      setStatus("Memuat sinyal POI & cuaca...");
+    }
     try {
       const bbox = region.bbox.join(",");
       const poiKey = `poi:${bbox}`;
-      const poiData = await getOrFetchSignal(
+      const poiResult = await getOrFetchSignal(
         poiKey,
         CACHE_TTL,
         async () => {
@@ -266,11 +275,16 @@ export function HeatmapClient() {
             points: Array<{ lat: number; lon: number }>;
           };
         },
-        { forceRefresh }
+        {
+          forceRefresh: forceRefresh && isOnline,
+          allowNetwork: isOnline,
+          allowStale: true
+        }
       );
+      setPoiMeta(poiResult.meta);
 
       const poiCells = binPointsToH3(
-        poiData.points.map((point) => ({ lat: point.lat, lon: point.lon })),
+        poiResult.payload.points.map((point) => ({ lat: point.lat, lon: point.lon })),
         H3_RESOLUTION
       );
       setPoiGeoJson(h3CellsToGeoJSON(poiCells));
@@ -278,7 +292,7 @@ export function HeatmapClient() {
       if (rainEnabled) {
         const [lon, lat] = center;
         const weatherKey = `weather:${lat.toFixed(3)},${lon.toFixed(3)}`;
-        const weatherData = await getOrFetchSignal(
+        const weatherResult = await getOrFetchSignal(
           weatherKey,
           CACHE_TTL,
           async () => {
@@ -288,9 +302,17 @@ export function HeatmapClient() {
             }
             return (await response.json()) as WeatherSummary;
           },
-          { forceRefresh }
+          {
+            forceRefresh: forceRefresh && isOnline,
+            allowNetwork: isOnline,
+            allowStale: true
+          }
         );
-        setWeather(weatherData);
+        setWeather(weatherResult.payload);
+        setWeatherMeta(weatherResult.meta);
+      } else {
+        setWeather(null);
+        setWeatherMeta(null);
       }
       setStatus("Sinyal diperbarui.");
     } catch (error) {
@@ -353,6 +375,9 @@ export function HeatmapClient() {
       variant: "danger"
     } as const;
   }, [weather, rainEnabled]);
+
+  const poiCacheLabel = formatCacheLabel("Sinyal POI", poiMeta);
+  const weatherCacheLabel = formatCacheLabel("Cuaca", weatherMeta);
 
   return (
     <div className="grid" style={{ gap: 24 }}>
@@ -440,7 +465,12 @@ export function HeatmapClient() {
                   {rainRisk.label}
                 </span>
               )}
+              <span className={`badge ${isOnline ? "success" : "danger"}`}>
+                {isOnline ? "Online" : "Offline"}
+              </span>
             </div>
+            <div className="helper-text">{poiCacheLabel}</div>
+            <div className="helper-text">{weatherCacheLabel}</div>
             {status && <div className="helper-text">{status}</div>}
           </div>
         </div>
@@ -527,4 +557,12 @@ export function HeatmapClient() {
       </div>
     </div>
   );
+}
+
+function formatCacheLabel(label: string, meta: SignalMeta | null) {
+  if (!meta || meta.ageSeconds === null) {
+    return `${label}: belum ada cache`;
+  }
+  const hours = (meta.ageSeconds / 3600).toFixed(1);
+  return `${label}: cached ${hours} jam`;
 }
