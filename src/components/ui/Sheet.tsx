@@ -37,14 +37,12 @@ export function Sheet({ open, onClose, title, children }: SheetProps) {
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet" onClick={(event) => event.stopPropagation()}>
         <div className="sheet-handle" />
-        {(title || onClose) && (
-          <div className="sheet-header">
-            <strong>{title}</strong>
-            <button type="button" className="ghost" onClick={onClose}>
-              Tutup
-            </button>
-          </div>
-        )}
+        <div className="sheet-header">
+          {title ? <strong>{title}</strong> : <span />}
+          <button type="button" className="ghost" onClick={onClose}>
+            Tutup
+          </button>
+        </div>
         <div className="sheet-body">{children}</div>
       </div>
     </div>,

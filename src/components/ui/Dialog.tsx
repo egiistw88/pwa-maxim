@@ -5,13 +5,21 @@ import { createPortal } from "react-dom";
 
 type DialogProps = {
   open: boolean;
-  onClose: () => void;
   title?: string;
+  onClose?: () => void;
+  dismissible?: boolean;
   children: React.ReactNode;
 };
 
-export function Dialog({ open, onClose, title, children }: DialogProps) {
+export function Dialog({
+  open,
+  onClose,
+  title,
+  dismissible = true,
+  children
+}: DialogProps) {
   const [mounted, setMounted] = useState(false);
+  const canDismiss = dismissible !== false && !!onClose;
 
   useEffect(() => {
     setMounted(true);
@@ -19,7 +27,7 @@ export function Dialog({ open, onClose, title, children }: DialogProps) {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && canDismiss && onClose) {
         onClose();
       }
     }
@@ -27,21 +35,28 @@ export function Dialog({ open, onClose, title, children }: DialogProps) {
       window.addEventListener("keydown", onKeyDown);
     }
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  }, [open, onClose, canDismiss]);
 
   if (!mounted || !open) {
     return null;
   }
 
   return createPortal(
-    <div className="dialog-backdrop" onClick={onClose}>
+    <div className="dialog-backdrop" onClick={canDismiss ? onClose : undefined}>
       <div className="dialog" onClick={(event) => event.stopPropagation()}>
         {(title || onClose) && (
           <div className="dialog-header">
-            <strong>{title}</strong>
-            <button type="button" className="ghost" onClick={onClose}>
-              Tutup
-            </button>
+            {title ? <strong>{title}</strong> : <span />}
+            {onClose ? (
+              <button
+                type="button"
+                className="ghost"
+                onClick={onClose}
+                aria-label="Close dialog"
+              >
+                ✕
+              </button>
+            ) : null}
           </div>
         )}
         <div className="dialog-body">{children}</div>
