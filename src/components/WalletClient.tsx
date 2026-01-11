@@ -62,13 +62,14 @@ export function WalletClient() {
   }
 
   useEffect(() => {
-    const defaultCategory = txType === "income" ? "Order" : "BBM";
+    const defaultCategory =
+      txType === "income" ? settings.defaultIncomeCategory ?? "Order" : "BBM";
     setTxCategory(defaultCategory);
-  }, [txType]);
+  }, [settings.defaultIncomeCategory, txType]);
 
   function handleOpenIncome() {
     setTxType("income");
-    setTxCategory("Order");
+    setTxCategory(settings.defaultIncomeCategory ?? "Order");
     setTxAmount("0");
     setTxNote("");
     setTxDialogOpen(true);
@@ -96,7 +97,7 @@ export function WalletClient() {
       return;
     }
 
-    const createdAt = new Date(parsed.data.createdAt).toISOString();
+    const createdAt = new Date(parsed.data.createdAt).getTime();
 
     const tx: WalletTx = {
       id: nanoid(),
@@ -112,7 +113,7 @@ export function WalletClient() {
     setTxAmount("0");
     setTxNote("");
     setTxType("income");
-    setTxCategory("Order");
+    setTxCategory(settings.defaultIncomeCategory ?? "Order");
     setTxDialogOpen(false);
     showStatus("Transaksi tersimpan.", "success");
   }

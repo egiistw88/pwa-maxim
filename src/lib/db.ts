@@ -3,8 +3,8 @@ import { defaultWeights } from "./engine/scoring";
 
 export type Trip = {
   id: string;
-  startedAt: string;
-  endedAt: string;
+  startedAt: number | string;
+  endedAt: number | string;
   startLat: number | null;
   startLon: number | null;
   endLat: number | null;
@@ -17,7 +17,7 @@ export type Trip = {
 
 export type WalletTx = {
   id: string;
-  createdAt: string;
+  createdAt: number | string;
   type: "income" | "expense";
   amount: number;
   category: string;
@@ -42,6 +42,7 @@ export type Settings = {
   autoAttachToActiveSession: boolean;
   autoAddIncomeFromTrips: boolean;
   hapticsEnabled: boolean;
+  defaultIncomeCategory: string;
   defaultBreakMinutes: number;
   baseAreaKey: string;
 };
@@ -63,6 +64,7 @@ export const defaultSettings: Settings = {
   autoAttachToActiveSession: true,
   autoAddIncomeFromTrips: true,
   hapticsEnabled: true,
+  defaultIncomeCategory: "Order",
   defaultBreakMinutes: 30,
   baseAreaKey: "timur"
 };

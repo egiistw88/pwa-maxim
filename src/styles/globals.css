@@ -385,6 +385,8 @@ button.danger {
   margin: -12px calc(50% - 50vw);
   height: calc(100dvh - var(--topbar-h) - var(--bottomnav-h));
   min-height: 520px;
+  overflow: hidden;
+  background: #ffffff;
 }
 
 .heatmap-map {
@@ -396,6 +398,21 @@ button.danger {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+.heatmap-error {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 5;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--border);
+  color: var(--danger);
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  text-align: center;
 }
 
 .heatmap-overlay > * {

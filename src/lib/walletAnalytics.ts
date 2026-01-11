@@ -1,5 +1,15 @@
 import type { WalletTx } from "./db";
 
+function toEpoch(value: string | number | Date) {
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+  if (typeof value === "number") {
+    return value;
+  }
+  return new Date(value).getTime();
+}
+
 export type CategorySummary = {
   category: string;
   amount: number;
@@ -39,8 +49,8 @@ export function sumByCategory(
     if (tx.type !== type) {
       continue;
     }
-    const createdAt = new Date(tx.createdAt);
-    if (createdAt < from || createdAt > to) {
+    const createdAtMs = toEpoch(tx.createdAt);
+    if (createdAtMs < from.getTime() || createdAtMs > to.getTime()) {
       continue;
     }
     totals[tx.category] = (totals[tx.category] ?? 0) + tx.amount;
@@ -87,8 +97,8 @@ export function rangeSummary(txs: WalletTx[], days: number): RangeSummary {
 function summarizeTotals(txs: WalletTx[], from: Date, to: Date): SummaryTotals {
   const totals = txs.reduce(
     (acc, tx) => {
-      const createdAt = new Date(tx.createdAt);
-      if (createdAt < from || createdAt > to) {
+      const createdAtMs = toEpoch(tx.createdAt);
+      if (createdAtMs < from.getTime() || createdAtMs > to.getTime()) {
         return acc;
       }
       if (tx.type === "income") {
