@@ -1,4 +1,4 @@
-import { cellToBoundary, latLngToCell } from "h3-js";
+import { cellToBoundary, cellToLatLng, latLngToCell } from "h3-js";
 import type { GeoJsonFeatureCollection } from "./geojsonTypes";
 
 export type PointInput = {
@@ -43,6 +43,31 @@ export function h3CellsToGeoJSON(
         geometry: {
           type: "Polygon" as const,
           coordinates
+        },
+        properties: {
+          value: cell.value,
+          intensity
+        }
+      };
+    })
+  };
+}
+
+export function h3CellsToPointGeoJSON(
+  cells: H3CellAggregate[]
+): GeoJsonFeatureCollection<{ value: number; intensity: number }> {
+  const maxValue = cells.reduce((acc, cell) => Math.max(acc, cell.value), 0);
+
+  return {
+    type: "FeatureCollection" as const,
+    features: cells.map((cell) => {
+      const [lat, lon] = cellToLatLng(cell.cell);
+      const intensity = maxValue > 0 ? cell.value / maxValue : 0;
+      return {
+        type: "Feature" as const,
+        geometry: {
+          type: "Point" as const,
+          coordinates: [lon, lat]
         },
         properties: {
           value: cell.value,

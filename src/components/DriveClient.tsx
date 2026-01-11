@@ -3,7 +3,7 @@
 import { nanoid } from "nanoid";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cellToLatLng, latLngToCell } from "h3-js";
-import { db, type Session, type Settings, type Trip } from "../lib/db";
+import { db, type Session, type Settings, type Trip, type WalletTx } from "../lib/db";
 import { type LatLon, type WeatherSummary } from "../lib/engine/features";
 import { recommendTopCells, type Recommendation } from "../lib/engine/recommend";
 import { updateWeightsFromOutcome, type Weights } from "../lib/engine/scoring";
@@ -237,7 +237,22 @@ export function DriveClient() {
         sessionId: draftTripStart.sessionId
       };
       const tripWithSession = await attachToActiveSession(trip);
-      await db.trips.add(tripWithSession);
+      await db.transaction("rw", db.trips, db.wallet_tx, async () => {
+        await db.trips.add(tripWithSession);
+        if (settings?.autoAddIncomeFromTrips ?? true) {
+          const walletTx: WalletTx = {
+            id: nanoid(),
+            createdAt: endedAt,
+            type: "income",
+            amount: earningsValue,
+            category: "Order",
+            note: "Order (Drive Mode)",
+            sessionId: tripWithSession.sessionId
+          };
+          const walletWithSession = await attachToActiveSession(walletTx);
+          await db.wallet_tx.add(walletWithSession);
+        }
+      });
       const durationHours = Math.max(
         (new Date(endedAt).getTime() - new Date(draftTripStart.startedAt).getTime()) /
           3_600_000,
