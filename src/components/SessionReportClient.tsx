@@ -183,7 +183,7 @@ export function SessionReportClient() {
               <button
                 key={session.id}
                 type="button"
-                className={`list-item ${session.id === selectedSessionId ? "active" : ""}`}
+                className={`btn list-item ${session.id === selectedSessionId ? "active" : ""}`}
                 style={{ textAlign: "left" }}
                 onClick={() => setSelectedSessionId(session.id)}
               >
@@ -241,7 +241,7 @@ export function SessionReportClient() {
                   </div>
                 )}
               </div>
-              <button type="button" className="secondary" onClick={handleExportCsv}>
+              <button type="button" className="btn secondary" onClick={handleExportCsv}>
                 Export CSV Sesi
               </button>
             </div>

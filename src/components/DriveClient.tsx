@@ -7,6 +7,7 @@ import { db, type Session, type Settings, type Trip } from "../lib/db";
 import { type LatLon, type WeatherSummary } from "../lib/engine/features";
 import { recommendTopCells, type Recommendation } from "../lib/engine/recommend";
 import { updateWeightsFromOutcome, type Weights } from "../lib/engine/scoring";
+import { haptic } from "../lib/haptics";
 import { getSettings, updateSettings } from "../lib/settings";
 import { attachToActiveSession, computeActiveMinutes, endSession, pauseSession, resumeSession, startSession } from "../lib/session";
 import { getOrFetchSignal } from "../lib/signals";
@@ -21,6 +22,7 @@ const HOLD_DURATION_MS = 600;
 const CACHE_TTL = 6 * 60 * 60;
 
 const AREA_OPTIONS = Object.keys(regions) as RegionKey[];
+type ToastState = { message: string; variant?: "success" | "error" };
 
 function formatDuration(seconds: number) {
   const totalMinutes = Math.floor(seconds / 60);
@@ -52,15 +54,9 @@ async function getCurrentPosition(): Promise<LatLon> {
   });
 }
 
-function vibrateFeedback() {
-  if (typeof navigator !== "undefined" && navigator.vibrate) {
-    navigator.vibrate(50);
-  }
-}
-
 export function DriveClient() {
   const { isOnline } = useNetworkStatus();
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<ToastState | null>(null);
   const [gpsStatus, setGpsStatus] = useState<string>("Belum dicek");
   const [formAreaKey, setFormAreaKey] = useState<RegionKey>("timur");
   const [formNote, setFormNote] = useState("");
@@ -132,6 +128,15 @@ export function DriveClient() {
 
   const areaKey = getAreaKey(activeSession, settings);
   const area = regions[areaKey];
+  const hapticsEnabled = settings?.hapticsEnabled ?? true;
+
+  function showStatus(message: string, variant?: ToastState["variant"]) {
+    setStatus({ message, variant });
+    if (!variant || !hapticsEnabled) {
+      return;
+    }
+    haptic(variant === "success" ? "success" : "error");
+  }
 
   function handleHoldStart(action: () => void) {
     if (holdTimerRef.current) {
@@ -139,7 +144,9 @@ export function DriveClient() {
     }
     holdTimerRef.current = window.setTimeout(() => {
       action();
-      vibrateFeedback();
+      if (hapticsEnabled) {
+        haptic("tap");
+      }
       holdTimerRef.current = null;
     }, HOLD_DURATION_MS);
   }
@@ -153,7 +160,7 @@ export function DriveClient() {
 
   async function handleStartSession() {
     const created = await startSession({ areaKey: formAreaKey, note: formNote || null });
-    setStatus("Sesi kerja dimulai.");
+    showStatus("Sesi kerja dimulai.", "success");
     setIsModalOpen(false);
     setFormNote("");
     if (settings && formAreaKey !== settings.baseAreaKey) {
@@ -164,22 +171,22 @@ export function DriveClient() {
 
   async function handlePauseSession() {
     await pauseSession();
-    setStatus("Sesi di-pause.");
+    showStatus("Sesi di-pause.");
   }
 
   async function handleResumeSession() {
     await resumeSession();
-    setStatus("Sesi dilanjutkan.");
+    showStatus("Sesi dilanjutkan.");
   }
 
   async function handleEndSession() {
     await endSession();
-    setStatus("Sesi selesai. Hati-hati di jalan.");
+    showStatus("Sesi selesai. Hati-hati di jalan.", "success");
   }
 
   async function handleStartOrder() {
     try {
-      setStatus("Mengambil lokasi mulai order...");
+      showStatus("Mengambil lokasi mulai order...");
       const position = await getCurrentPosition();
       setGpsStatus("GPS siap");
       const predictedScoreAtStart = recommendations[0]?.score ?? 0;
@@ -191,27 +198,28 @@ export function DriveClient() {
         predictedScoreAtStart,
         sessionId: activeSessionId
       });
-      setStatus("Order dimulai.");
+      showStatus("Order dimulai.", "success");
     } catch (error) {
       setGpsStatus("GPS gagal");
-      setStatus(
-        error instanceof Error ? error.message : "Gagal mengambil lokasi mulai order"
+      showStatus(
+        error instanceof Error ? error.message : "Gagal mengambil lokasi mulai order",
+        "error"
       );
     }
   }
 
   async function handleFinishOrder() {
     if (!draftTripStart) {
-      setStatus("Mulai order dulu.");
+      showStatus("Mulai order dulu.", "error");
       return;
     }
     const earningsValue = Number(earningsInput);
     if (!Number.isFinite(earningsValue) || earningsValue <= 0) {
-      setStatus("Isi pendapatan minimal.");
+      showStatus("Isi pendapatan minimal.", "error");
       return;
     }
     try {
-      setStatus("Mengambil lokasi selesai order...");
+      showStatus("Mengambil lokasi selesai order...");
       const position = await getCurrentPosition();
       setGpsStatus("GPS siap");
       const endedAt = new Date().toISOString();
@@ -248,11 +256,12 @@ export function DriveClient() {
       setEarningsInput("");
       setOrderNote("");
       setEndDialogOpen(false);
-      setStatus("Order selesai & trip tersimpan.");
+      showStatus("Order selesai & trip tersimpan.", "success");
     } catch (error) {
       setGpsStatus("GPS gagal");
-      setStatus(
-        error instanceof Error ? error.message : "Gagal menyimpan order selesai"
+      showStatus(
+        error instanceof Error ? error.message : "Gagal menyimpan order selesai",
+        "error"
       );
     }
   }
@@ -330,7 +339,7 @@ export function DriveClient() {
 
   async function handleNgetemNow() {
     try {
-      setStatus("Mengambil rekomendasi ngetem...");
+      showStatus("Mengambil rekomendasi ngetem...");
       const settingsData = settings ?? (await getSettings());
       const bbox = area.bbox.join(",");
       const poiKey = `poi:${bbox}`;
@@ -369,7 +378,7 @@ export function DriveClient() {
 
       const { candidateCells, poiCounts } = buildCandidateCells(settingsData, poiResult.payload.points);
       if (candidateCells.length === 0) {
-        setStatus("Belum ada kandidat. Tambah trip atau tunggu POI.");
+        showStatus("Belum ada kandidat. Tambah trip atau tunggu POI.", "error");
         return;
       }
       const recommended = recommendTopCells({
@@ -382,9 +391,9 @@ export function DriveClient() {
         settings: settingsData
       });
       setRecommendations(recommended);
-      setStatus("Rekomendasi siap.");
+      showStatus("Rekomendasi siap.", "success");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Gagal memuat rekomendasi");
+      showStatus(error instanceof Error ? error.message : "Gagal memuat rekomendasi", "error");
     }
   }
 
@@ -397,10 +406,10 @@ export function DriveClient() {
           <div>GPS: {gpsStatus}</div>
         </div>
         <div className="form-row" style={{ marginTop: 10 }}>
-          <button type="button" className="ghost" onClick={() => setIsModalOpen(true)}>
+          <button type="button" className="btn ghost" onClick={() => setIsModalOpen(true)}>
             Kelola Sesi
           </button>
-          <button type="button" className="ghost" onClick={() => setNgetemOpen(true)}>
+          <button type="button" className="btn ghost" onClick={() => setNgetemOpen(true)}>
             Lihat Ngetem
           </button>
         </div>
@@ -409,6 +418,7 @@ export function DriveClient() {
       <div className="card drive-actions">
         <button
           type="button"
+          className="btn primary"
           onPointerDown={() => handleHoldStart(() => void handleStartOrder())}
           onPointerUp={handleHoldCancel}
           onPointerLeave={handleHoldCancel}
@@ -418,14 +428,14 @@ export function DriveClient() {
         </button>
         <div className="hold-hint">Tap & tahan 0,6 detik untuk mulai.</div>
 
-        <button type="button" className="warning" onClick={() => void handleNgetemRequest()}>
+        <button type="button" className="btn warning" onClick={() => void handleNgetemRequest()}>
           NGETEM NOW
         </button>
         <div className="hold-hint">Hasil tampil di sheet.</div>
 
         <button
           type="button"
-          className="danger"
+          className="btn danger"
           onPointerDown={() => handleHoldStart(() => setEndDialogOpen(true))}
           onPointerUp={handleHoldCancel}
           onPointerLeave={handleHoldCancel}
@@ -462,22 +472,22 @@ export function DriveClient() {
           </div>
           <div className="form-row">
             {!activeSession && (
-              <button type="button" onClick={() => void handleStartSession()}>
+              <button type="button" className="btn primary" onClick={() => void handleStartSession()}>
                 Mulai Kerja
               </button>
             )}
             {activeSession && activeSession.status === "active" && (
-              <button type="button" className="secondary" onClick={() => void handlePauseSession()}>
+              <button type="button" className="btn secondary" onClick={() => void handlePauseSession()}>
                 Istirahat
               </button>
             )}
             {activeSession && activeSession.status === "paused" && (
-              <button type="button" className="secondary" onClick={() => void handleResumeSession()}>
+              <button type="button" className="btn secondary" onClick={() => void handleResumeSession()}>
                 Lanjutkan
               </button>
             )}
             {activeSession && (
-              <button type="button" className="danger" onClick={() => void handleEndSession()}>
+              <button type="button" className="btn danger" onClick={() => void handleEndSession()}>
                 Akhiri
               </button>
             )}
@@ -497,7 +507,7 @@ export function DriveClient() {
           />
           <div className="form-row">
             {[5000, 10000, 20000].map((value) => (
-              <button key={value} type="button" className="secondary" onClick={() => handlePreset(value)}>
+              <button key={value} type="button" className="btn secondary" onClick={() => handlePreset(value)}>
                 +{value.toLocaleString("id-ID")}
               </button>
             ))}
@@ -507,27 +517,27 @@ export function DriveClient() {
               <button
                 key={digit}
                 type="button"
-                className="secondary"
+                className="btn secondary"
                 onClick={() => appendEarningsDigit(digit)}
               >
                 {digit}
               </button>
             ))}
-            <button type="button" className="secondary" onClick={() => appendEarningsDigit("0")}>
+            <button type="button" className="btn secondary" onClick={() => appendEarningsDigit("0")}>
               0
             </button>
-            <button type="button" className="secondary" onClick={handleBackspace}>
+            <button type="button" className="btn secondary" onClick={handleBackspace}>
               ⌫
             </button>
-            <button type="button" className="secondary" onClick={() => setEarningsInput("0")}>
+            <button type="button" className="btn secondary" onClick={() => setEarningsInput("0")}>
               C
             </button>
           </div>
           <div className="form-row">
-            <button type="button" className="ghost" onClick={() => setNoteDialogOpen(true)}>
+            <button type="button" className="btn ghost" onClick={() => setNoteDialogOpen(true)}>
               Catatan
             </button>
-            <button type="button" onClick={() => void handleFinishOrder()}>
+            <button type="button" className="btn primary" onClick={() => void handleFinishOrder()}>
               Simpan
             </button>
           </div>
@@ -543,10 +553,10 @@ export function DriveClient() {
             onChange={(event) => setOrderNote(event.target.value)}
           />
           <div className="form-row">
-            <button type="button" className="secondary">
+            <button type="button" className="btn secondary">
               🎤 Mic
             </button>
-            <button type="button" onClick={() => setNoteDialogOpen(false)}>
+            <button type="button" className="btn primary" onClick={() => setNoteDialogOpen(false)}>
               Simpan
             </button>
           </div>
@@ -567,7 +577,7 @@ export function DriveClient() {
                 <div className="helper-text">{rec.reasons.slice(0, 2).join(" • ")}</div>
                 <button
                   type="button"
-                  className="secondary"
+                  className="btn secondary"
                   onClick={() =>
                     window.open(
                       `https://www.google.com/maps/dir/?api=1&destination=${dest}`,
@@ -583,7 +593,12 @@ export function DriveClient() {
         </div>
       </Sheet>
 
-      <Toast open={Boolean(status)} message={status ?? ""} onClose={() => setStatus(null)} />
+      <Toast
+        open={Boolean(status)}
+        message={status?.message ?? ""}
+        variant={status?.variant}
+        onClose={() => setStatus(null)}
+      />
     </div>
   );
 }

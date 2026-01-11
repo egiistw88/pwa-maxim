@@ -2,6 +2,7 @@ import "../styles/globals.css";
 import type { Metadata, Viewport } from "next";
 import { AppHeader } from "../components/AppHeader";
 import { BottomNav } from "../components/BottomNav";
+import { PageTransition } from "../components/PageTransition";
 import { ServiceWorkerRegister } from "../components/ServiceWorkerRegister";
 
 export const metadata: Metadata = {
@@ -29,9 +30,7 @@ export default function RootLayout({
       <body>
         <div className="app-shell">
           <AppHeader />
-          <main>
-            <div className="container">{children}</div>
-          </main>
+          <PageTransition>{children}</PageTransition>
           <BottomNav />
         </div>
         <ServiceWorkerRegister />

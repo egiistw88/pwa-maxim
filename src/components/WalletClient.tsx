@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { db, defaultSettings, normalizeSettings, type Settings, type WalletTx } from "../lib/db";
+import { haptic } from "../lib/haptics";
 import { attachToActiveSession } from "../lib/session";
 import { dailySummary } from "../lib/walletAnalytics";
 import { getSettings } from "../lib/settings";
@@ -21,11 +22,12 @@ const walletSchema = z.object({
 });
 
 const formatCurrency = (value: number) => `Rp ${value.toLocaleString("id-ID")}`;
+type ToastState = { message: string; variant?: "success" | "error" };
 
 export function WalletClient() {
   const [transactions, setTransactions] = useState<WalletTx[]>([]);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<ToastState | null>(null);
   const [txDialogOpen, setTxDialogOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [txType, setTxType] = useState<"income" | "expense">("income");
@@ -48,6 +50,16 @@ export function WalletClient() {
   useEffect(() => {
     setSettings(normalizeSettings(liveSettings));
   }, [liveSettings]);
+
+  const hapticsEnabled = settings.hapticsEnabled ?? true;
+
+  function showStatus(message: string, variant?: ToastState["variant"]) {
+    setStatus({ message, variant });
+    if (!variant || !hapticsEnabled) {
+      return;
+    }
+    haptic(variant === "success" ? "success" : "error");
+  }
 
   useEffect(() => {
     const defaultCategory = txType === "income" ? "Order" : "BBM";
@@ -80,7 +92,7 @@ export function WalletClient() {
     });
 
     if (!parsed.success) {
-      setStatus(parsed.error.flatten().formErrors.join(", "));
+      showStatus(parsed.error.flatten().formErrors.join(", "), "error");
       return;
     }
 
@@ -102,7 +114,7 @@ export function WalletClient() {
     setTxType("income");
     setTxCategory("Order");
     setTxDialogOpen(false);
-    setStatus("Transaksi tersimpan.");
+    showStatus("Transaksi tersimpan.", "success");
   }
 
   function appendTxDigit(value: string) {
@@ -170,26 +182,26 @@ export function WalletClient() {
 
       <div className="card">
         <div className="form-row">
-          <button type="button" onClick={handleOpenIncome}>
+          <button type="button" className="btn primary" onClick={handleOpenIncome}>
             + Order
           </button>
-          <button type="button" className="secondary" onClick={() => handleOpenExpense("BBM")}>
+          <button type="button" className="btn secondary" onClick={() => handleOpenExpense("BBM")}>
             BBM
           </button>
-          <button type="button" className="secondary" onClick={() => handleOpenExpense("Makan")}>
+          <button type="button" className="btn secondary" onClick={() => handleOpenExpense("Makan")}>
             Makan
           </button>
-          <button type="button" className="secondary" onClick={() => handleOpenExpense("Parkir")}>
+          <button type="button" className="btn secondary" onClick={() => handleOpenExpense("Parkir")}>
             Parkir
           </button>
-          <button type="button" className="secondary" onClick={() => handleOpenExpense("Servis")}>
+          <button type="button" className="btn secondary" onClick={() => handleOpenExpense("Servis")}>
             Servis
           </button>
         </div>
       </div>
 
       <div className="card">
-        <button type="button" className="secondary" onClick={() => setHistoryOpen(true)}>
+        <button type="button" className="btn secondary" onClick={() => setHistoryOpen(true)}>
           Riwayat
         </button>
       </div>
@@ -211,7 +223,7 @@ export function WalletClient() {
           />
           <div className="form-row">
             {[5000, 10000, 20000, 50000].map((value) => (
-              <button key={value} type="button" className="secondary" onClick={() => handleTxPreset(value)}>
+              <button key={value} type="button" className="btn secondary" onClick={() => handleTxPreset(value)}>
                 {value.toLocaleString("id-ID")}
               </button>
             ))}
@@ -221,27 +233,27 @@ export function WalletClient() {
               <button
                 key={digit}
                 type="button"
-                className="secondary"
+                className="btn secondary"
                 onClick={() => appendTxDigit(digit)}
               >
                 {digit}
               </button>
             ))}
-            <button type="button" className="secondary" onClick={() => appendTxDigit("0")}>
+            <button type="button" className="btn secondary" onClick={() => appendTxDigit("0")}>
               0
             </button>
-            <button type="button" className="secondary" onClick={handleTxBackspace}>
+            <button type="button" className="btn secondary" onClick={handleTxBackspace}>
               ⌫
             </button>
-            <button type="button" className="secondary" onClick={() => setTxAmount("0")}>
+            <button type="button" className="btn secondary" onClick={() => setTxAmount("0")}>
               C
             </button>
           </div>
           <div className="form-row">
-            <button type="button" className="ghost" onClick={() => setTxNote("")}>
+            <button type="button" className="btn ghost" onClick={() => setTxNote("")}>
               Hapus catatan
             </button>
-            <button type="button" onClick={() => void handleSaveTransaction()}>
+            <button type="button" className="btn primary" onClick={() => void handleSaveTransaction()}>
               Simpan
             </button>
           </div>
@@ -255,7 +267,7 @@ export function WalletClient() {
               <button
                 key={type}
                 type="button"
-                className={`chip ${historyType === type ? "active" : ""}`}
+                className={`btn chip ${historyType === type ? "active" : ""}`}
                 onClick={() => setHistoryType(type)}
               >
                 {type === "all" ? "Semua" : type === "income" ? "Income" : "Expense"}
@@ -267,7 +279,7 @@ export function WalletClient() {
               <button
                 key={category}
                 type="button"
-                className={`chip ${historyCategory === category ? "active" : ""}`}
+                className={`btn chip ${historyCategory === category ? "active" : ""}`}
                 onClick={() => setHistoryCategory(category)}
               >
                 {category === "all" ? "Semua" : category}
@@ -293,7 +305,12 @@ export function WalletClient() {
         </div>
       </Sheet>
 
-      <Toast open={Boolean(status)} message={status ?? ""} onClose={() => setStatus(null)} />
+      <Toast
+        open={Boolean(status)}
+        message={status?.message ?? ""}
+        variant={status?.variant}
+        onClose={() => setStatus(null)}
+      />
     </div>
   );
 }

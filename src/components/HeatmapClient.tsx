@@ -11,6 +11,7 @@ import { db, type Settings, type Session, type Trip } from "../lib/db";
 import { type LatLon, type WeatherSummary } from "../lib/engine/features";
 import { recommendTopCells, type Recommendation } from "../lib/engine/recommend";
 import { updateWeightsFromOutcome, type Weights } from "../lib/engine/scoring";
+import { haptic } from "../lib/haptics";
 import { binPointsToH3, h3CellsToGeoJSON } from "../lib/h3";
 import { getSettings, updateSettings } from "../lib/settings";
 import { attachToActiveSession, computeActiveMinutes } from "../lib/session";
@@ -35,6 +36,7 @@ const tripSchema = z.object({
 
 const H3_RESOLUTION = 9;
 const CACHE_TTL = 6 * 60 * 60;
+type ToastState = { message: string; variant?: "success" | "error" };
 
 const mapStyle: StyleSpecification = {
   version: 8,
@@ -69,7 +71,7 @@ export function HeatmapClient() {
   const [internalEnabled, setInternalEnabled] = useState(true);
   const [poiEnabled, setPoiEnabled] = useState(true);
   const [rainEnabled, setRainEnabled] = useState(true);
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<ToastState | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [poiPoints, setPoiPoints] = useState<Array<{ lat: number; lon: number }>>([]);
   const [poiMeta, setPoiMeta] = useState<SignalMeta | null>(null);
@@ -91,6 +93,7 @@ export function HeatmapClient() {
   const [earningsInput, setEarningsInput] = useState<string>("");
   const [layersOpen, setLayersOpen] = useState(false);
   const [regionOpen, setRegionOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const { isOnline } = useNetworkStatus();
 
@@ -99,6 +102,15 @@ export function HeatmapClient() {
   const timerRef = useRef<number | null>(null);
 
   const region = regions[regionKey];
+  const hapticsEnabled = settings?.hapticsEnabled ?? true;
+
+  function showStatus(message: string, variant?: ToastState["variant"]) {
+    setStatus({ message, variant });
+    if (!variant || !hapticsEnabled) {
+      return;
+    }
+    haptic(variant === "success" ? "success" : "error");
+  }
   const center = useMemo(() => {
     const [minLon, minLat, maxLon, maxLat] = region.bbox;
     return [(minLon + maxLon) / 2, (minLat + maxLat) / 2] as [number, number];
@@ -331,13 +343,14 @@ export function HeatmapClient() {
 
   async function loadPoiSignal(forceRefresh: boolean) {
     if (!isOnline) {
-      setStatus(
+      showStatus(
         forceRefresh
           ? "Offline. Menampilkan cache terakhir (tanpa fetch)."
-          : "Offline. Menggunakan cache terakhir."
+          : "Offline. Menggunakan cache terakhir.",
+        forceRefresh ? "error" : undefined
       );
     } else {
-      setStatus("Memuat sinyal POI...");
+      showStatus("Memuat sinyal POI...");
     }
     try {
       const bbox = region.bbox.join(",");
@@ -370,7 +383,7 @@ export function HeatmapClient() {
       setPoiGeoJson(h3CellsToGeoJSON(poiCells));
       return poiResult.meta;
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Gagal mengambil sinyal POI");
+      showStatus(error instanceof Error ? error.message : "Gagal mengambil sinyal POI", "error");
       return null;
     }
   }
@@ -382,13 +395,14 @@ export function HeatmapClient() {
       return null;
     }
     if (!isOnline) {
-      setStatus(
+      showStatus(
         forceRefresh
           ? "Offline. Menampilkan cache terakhir (tanpa fetch)."
-          : "Offline. Menggunakan cache terakhir."
+          : "Offline. Menggunakan cache terakhir.",
+        forceRefresh ? "error" : undefined
       );
     } else {
-      setStatus("Memuat sinyal cuaca...");
+      showStatus("Memuat sinyal cuaca...");
     }
     try {
       const [lon, lat] = center;
@@ -413,20 +427,26 @@ export function HeatmapClient() {
       setWeatherMeta(weatherResult.meta);
       return weatherResult.meta;
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Gagal mengambil sinyal cuaca");
+      showStatus(error instanceof Error ? error.message : "Gagal mengambil sinyal cuaca", "error");
       return null;
     }
   }
 
   async function loadSignals(forceRefresh: boolean) {
     try {
+      if (forceRefresh) {
+        setIsRefreshing(true);
+      }
       await loadPoiSignal(forceRefresh);
       await loadWeatherSignal(forceRefresh);
-      setStatus("Sinyal diperbarui.");
+      showStatus("Sinyal diperbarui.", "success");
     } catch (error) {
-      setStatus(
-        error instanceof Error ? error.message : "Terjadi kesalahan saat memuat sinyal"
+      showStatus(
+        error instanceof Error ? error.message : "Terjadi kesalahan saat memuat sinyal",
+        "error"
       );
+    } finally {
+      setIsRefreshing(false);
     }
   }
 
@@ -445,7 +465,7 @@ export function HeatmapClient() {
     });
 
     if (!parsed.success) {
-      setStatus(parsed.error.flatten().formErrors.join(", "));
+      showStatus(parsed.error.flatten().formErrors.join(", "), "error");
       return;
     }
 
@@ -465,7 +485,7 @@ export function HeatmapClient() {
     const tripWithSession = await attachToActiveSession(trip);
     await db.trips.add(tripWithSession);
     event.currentTarget.reset();
-    setStatus("Trip tersimpan.");
+    showStatus("Trip tersimpan.", "success");
   }
 
   function buildCandidateCells(
@@ -558,14 +578,14 @@ export function HeatmapClient() {
 
   async function handleStartNgetem() {
     try {
-      setStatus("Mengambil lokasi...");
+      showStatus("Mengambil lokasi...");
       const position = await getCurrentPosition();
       setMyPos(position);
       const settingsData = settings ?? (await getSettings());
       setSettings(settingsData);
       const { candidateCells, poiCounts } = buildCandidateCells(poiPoints, settingsData);
       if (candidateCells.length === 0) {
-        setStatus("Belum ada kandidat. Tambah trip atau POI dulu.");
+        showStatus("Belum ada kandidat. Tambah trip atau POI dulu.", "error");
         return;
       }
       const top = recommendTopCells({
@@ -600,19 +620,20 @@ export function HeatmapClient() {
           reasons: item.reasons
         }))
       });
-      setStatus("Rekomendasi siap.");
+      showStatus("Rekomendasi siap.", "success");
     } catch (error) {
-      setStatus(
+      showStatus(
         error instanceof Error
           ? error.message
-          : "Gagal mengambil lokasi untuk rekomendasi"
+          : "Gagal mengambil lokasi untuk rekomendasi",
+        "error"
       );
     }
   }
 
   async function handleStartOrder() {
     try {
-      setStatus("Mengambil lokasi mulai order...");
+      showStatus("Mengambil lokasi mulai order...");
       const position = await getCurrentPosition();
       const predictedScoreAtStart = recommendations[0]?.score ?? 0;
       const activeSessionId = activeSession?.id;
@@ -623,26 +644,27 @@ export function HeatmapClient() {
         predictedScoreAtStart,
         sessionId: activeSessionId
       });
-      setStatus("Order dimulai.");
+      showStatus("Order dimulai.", "success");
     } catch (error) {
-      setStatus(
-        error instanceof Error ? error.message : "Gagal mengambil lokasi mulai order"
+      showStatus(
+        error instanceof Error ? error.message : "Gagal mengambil lokasi mulai order",
+        "error"
       );
     }
   }
 
   async function handleFinishOrder() {
     if (!draftTripStart) {
-      setStatus("Mulai order dulu.");
+      showStatus("Mulai order dulu.", "error");
       return;
     }
     const earningsValue = Number(earningsInput);
     if (!Number.isFinite(earningsValue) || earningsValue <= 0) {
-      setStatus("Isi pendapatan minimal.");
+      showStatus("Isi pendapatan minimal.", "error");
       return;
     }
     try {
-      setStatus("Mengambil lokasi selesai order...");
+      showStatus("Mengambil lokasi selesai order...");
       const position = await getCurrentPosition();
       const endedAt = new Date().toISOString();
       const trip: Trip = {
@@ -676,10 +698,11 @@ export function HeatmapClient() {
       }
       setDraftTripStart(null);
       setEarningsInput("");
-      setStatus("Order selesai & trip tersimpan.");
+      showStatus("Order selesai & trip tersimpan.", "success");
     } catch (error) {
-      setStatus(
-        error instanceof Error ? error.message : "Gagal menyimpan order selesai"
+      showStatus(
+        error instanceof Error ? error.message : "Gagal menyimpan order selesai",
+        "error"
       );
     }
   }
@@ -720,16 +743,16 @@ export function HeatmapClient() {
       <div className="heatmap-map" ref={mapContainerRef} />
       <div className="heatmap-overlay">
         <div className="heatmap-top">
-          <button type="button" className="chip" onClick={() => setRegionOpen(true)}>
+          <button type="button" className="btn chip" onClick={() => setRegionOpen(true)}>
             Wilayah · {region.label.replace("Bandung ", "")}
           </button>
         </div>
         <div className="heatmap-fabs">
-          <button type="button" className="fab secondary" onClick={() => setLayersOpen(true)}>
+          <button type="button" className="btn fab secondary" onClick={() => setLayersOpen(true)}>
             ☰
           </button>
-          <button type="button" className="fab" onClick={() => void loadSignals(true)}>
-            ↻
+          <button type="button" className="btn fab primary" onClick={() => void loadSignals(true)}>
+            {isRefreshing ? <span className="spinner" aria-label="Memuat" /> : "↻"}
           </button>
         </div>
       </div>
@@ -738,21 +761,21 @@ export function HeatmapClient() {
           <div className="form-row">
             <button
               type="button"
-              className={`chip ${internalEnabled ? "active" : ""}`}
+              className={`btn chip ${internalEnabled ? "active" : ""}`}
               onClick={() => setInternalEnabled((prev) => !prev)}
             >
               Internal
             </button>
             <button
               type="button"
-              className={`chip ${poiEnabled ? "active" : ""}`}
+              className={`btn chip ${poiEnabled ? "active" : ""}`}
               onClick={() => setPoiEnabled((prev) => !prev)}
             >
               POI
             </button>
             <button
               type="button"
-              className={`chip ${rainEnabled ? "active" : ""}`}
+              className={`btn chip ${rainEnabled ? "active" : ""}`}
               onClick={() => setRainEnabled((prev) => !prev)}
             >
               Cuaca
@@ -770,12 +793,12 @@ export function HeatmapClient() {
             </div>
           </div>
           <div className="form-row">
-            <button type="button" className="secondary" onClick={() => void loadPoiSignal(true)}>
+            <button type="button" className="btn secondary" onClick={() => void loadPoiSignal(true)}>
               Refresh POI
             </button>
             <button
               type="button"
-              className="secondary"
+              className="btn secondary"
               onClick={() => void loadWeatherSignal(true)}
             >
               Refresh Cuaca
@@ -785,7 +808,7 @@ export function HeatmapClient() {
             <div className="helper-text">
               POI gagal: {poiMeta.lastErrorMessage}
               <div style={{ marginTop: 8 }}>
-                <button type="button" className="ghost" onClick={() => void loadPoiSignal(true)}>
+                <button type="button" className="btn ghost" onClick={() => void loadPoiSignal(true)}>
                   Coba lagi
                 </button>
               </div>
@@ -799,7 +822,7 @@ export function HeatmapClient() {
             <button
               key={key}
               type="button"
-              className={`segment-button ${regionKey === key ? "active" : ""}`}
+              className={`btn segment-button ${regionKey === key ? "active" : ""}`}
               onClick={() => {
                 setRegionKey(key as RegionKey);
                 setRegionOpen(false);
@@ -810,7 +833,12 @@ export function HeatmapClient() {
           ))}
         </div>
       </Sheet>
-      <Toast open={Boolean(status)} message={status ?? ""} onClose={() => setStatus(null)} />
+      <Toast
+        open={Boolean(status)}
+        message={status?.message ?? ""}
+        variant={status?.variant}
+        onClose={() => setStatus(null)}
+      />
     </div>
   );
 }
