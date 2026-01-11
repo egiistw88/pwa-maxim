@@ -10,13 +10,13 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
-    title: "Maxim Copilot Bandung"
+    statusBarStyle: "default",
+    title: "Maxim Copilot"
   }
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0b0f19"
+  themeColor: "#ffffff"
 };
 
 export default function RootLayout({

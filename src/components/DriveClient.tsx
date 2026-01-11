@@ -13,6 +13,9 @@ import { getOrFetchSignal } from "../lib/signals";
 import { useNetworkStatus } from "../lib/useNetworkStatus";
 import { regions, type RegionKey } from "../lib/regions";
 import { useLiveQueryState } from "../lib/useLiveQueryState";
+import { Dialog } from "./ui/Dialog";
+import { Sheet } from "./ui/Sheet";
+import { Toast } from "./ui/Toast";
 
 const HOLD_DURATION_MS = 600;
 const CACHE_TTL = 6 * 60 * 60;
@@ -63,6 +66,10 @@ export function DriveClient() {
   const [formNote, setFormNote] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeSeconds, setActiveSeconds] = useState(0);
+  const [endDialogOpen, setEndDialogOpen] = useState(false);
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  const [ngetemOpen, setNgetemOpen] = useState(false);
+  const [orderNote, setOrderNote] = useState("");
   const [draftTripStart, setDraftTripStart] = useState<{
     startedAt: string;
     startLat: number;
@@ -217,6 +224,7 @@ export function DriveClient() {
         endLat: position.lat,
         endLon: position.lon,
         earnings: earningsValue,
+        note: orderNote || undefined,
         source: "assistant",
         sessionId: draftTripStart.sessionId
       };
@@ -238,6 +246,8 @@ export function DriveClient() {
       }
       setDraftTripStart(null);
       setEarningsInput("");
+      setOrderNote("");
+      setEndDialogOpen(false);
       setStatus("Order selesai & trip tersimpan.");
     } catch (error) {
       setGpsStatus("GPS gagal");
@@ -245,6 +255,29 @@ export function DriveClient() {
         error instanceof Error ? error.message : "Gagal menyimpan order selesai"
       );
     }
+  }
+
+  function appendEarningsDigit(value: string) {
+    setEarningsInput((prev) => {
+      const next = prev === "0" ? value : `${prev}${value}`;
+      return next.replace(/^0+(?=\\d)/, "");
+    });
+  }
+
+  function handlePreset(amount: number) {
+    setEarningsInput((prev) => {
+      const current = Number(prev || 0);
+      return String(current + amount);
+    });
+  }
+
+  function handleBackspace() {
+    setEarningsInput((prev) => (prev.length <= 1 ? "0" : prev.slice(0, -1)));
+  }
+
+  async function handleNgetemRequest() {
+    await handleNgetemNow();
+    setNgetemOpen(true);
   }
 
   function buildCandidateCells(settingsData: Settings, points: Array<{ lat: number; lon: number }>) {
@@ -356,94 +389,24 @@ export function DriveClient() {
   }
 
   return (
-    <div className="drive-screen">
+    <div className="grid" style={{ gap: 12 }}>
       <div className="card">
-        <h2 className="page-title">Drive Mode</h2>
-        <div className="helper-text">
-          Status sesi: <strong>{statusLabel}</strong> • Waktu aktif:{" "}
-          {activeSession ? formatDuration(activeSeconds) : "00:00"}
+        <div className="status-row">
+          <div>Session: {statusLabel}</div>
+          <div>Order: {draftTripStart ? "Aktif" : "Tidak aktif"}</div>
+          <div>GPS: {gpsStatus}</div>
         </div>
-        <div className="helper-text">
-          Order aktif: {draftTripStart ? "Sedang jalan" : "Belum ada"} • GPS: {gpsStatus}
+        <div className="form-row" style={{ marginTop: 10 }}>
+          <button type="button" className="ghost" onClick={() => setIsModalOpen(true)}>
+            Kelola Sesi
+          </button>
+          <button type="button" className="ghost" onClick={() => setNgetemOpen(true)}>
+            Lihat Ngetem
+          </button>
         </div>
       </div>
 
-      <div className="card">
-        <div className="form-row" style={{ justifyContent: "space-between" }}>
-          <strong>Kontrol Sesi</strong>
-          {!activeSession && (
-            <button type="button" onClick={() => setIsModalOpen(true)}>
-              Mulai Kerja
-            </button>
-          )}
-        </div>
-        {activeSession?.status === "active" && (
-          <div className="form-row" style={{ marginTop: 12 }}>
-            <button type="button" className="secondary" onClick={() => void handlePauseSession()}>
-              Istirahat
-            </button>
-            <button type="button" className="ghost" onClick={() => void handleEndSession()}>
-              Pulang
-            </button>
-          </div>
-        )}
-        {activeSession?.status === "paused" && (
-          <div className="form-row" style={{ marginTop: 12 }}>
-            <button type="button" onClick={() => void handleResumeSession()}>
-              Lanjut
-            </button>
-            <button type="button" className="ghost" onClick={() => void handleEndSession()}>
-              Pulang
-            </button>
-          </div>
-        )}
-        {isModalOpen && (
-          <div className="stacked" style={{ marginTop: 12 }}>
-            <div className="form-row">
-              <div>
-                <label>Base area</label>
-                <select
-                  value={formAreaKey}
-                  onChange={(event) => setFormAreaKey(event.target.value as RegionKey)}
-                >
-                  {AREA_OPTIONS.map((areaOption) => (
-                    <option key={areaOption} value={areaOption}>
-                      {regions[areaOption].label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div style={{ flex: 1 }}>
-                <label>Catatan</label>
-                <input
-                  type="text"
-                  placeholder="Opsional"
-                  value={formNote}
-                  onChange={(event) => setFormNote(event.target.value)}
-                />
-              </div>
-            </div>
-            <div className="form-row">
-              <button type="button" onClick={() => void handleStartSession()}>
-                Mulai Kerja
-              </button>
-              <button type="button" className="ghost" onClick={() => setIsModalOpen(false)}>
-                Batal
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="card">
-        <strong>Area aktif</strong>
-        <div className="helper-text">{area.label}</div>
-        <div className="helper-text">
-          Online: {isOnline ? "Ya" : "Tidak"} • Sinyal POI & cuaca tetap memakai cache.
-        </div>
-      </div>
-
-      <div className="card drive-actions sticky-cta">
+      <div className="card drive-actions">
         <button
           type="button"
           onPointerDown={() => handleHoldStart(() => void handleStartOrder())}
@@ -455,16 +418,75 @@ export function DriveClient() {
         </button>
         <div className="hold-hint">Tap & tahan 0,6 detik untuk mulai.</div>
 
-        <button
-          type="button"
-          className="warning"
-          onClick={() => void handleNgetemNow()}
-        >
+        <button type="button" className="warning" onClick={() => void handleNgetemRequest()}>
           NGETEM NOW
         </button>
-        <div className="hold-hint">Terhubung ke engine rekomendasi area.</div>
+        <div className="hold-hint">Hasil tampil di sheet.</div>
 
-        <div className="form-row">
+        <button
+          type="button"
+          className="danger"
+          onPointerDown={() => handleHoldStart(() => setEndDialogOpen(true))}
+          onPointerUp={handleHoldCancel}
+          onPointerLeave={handleHoldCancel}
+          onPointerCancel={handleHoldCancel}
+        >
+          END ORDER
+        </button>
+        <div className="hold-hint">Tap & tahan 0,6 detik untuk lanjut input.</div>
+      </div>
+
+      <Dialog open={isModalOpen} onClose={() => setIsModalOpen(false)} title="Sesi">
+        <div className="grid">
+          <div>
+            <label>Wilayah</label>
+            <select
+              value={formAreaKey}
+              onChange={(event) => setFormAreaKey(event.target.value as RegionKey)}
+            >
+              {AREA_OPTIONS.map((key) => (
+                <option key={key} value={key}>
+                  {regions[key].label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label>Catatan</label>
+            <input
+              type="text"
+              placeholder="Opsional"
+              value={formNote}
+              onChange={(event) => setFormNote(event.target.value)}
+            />
+          </div>
+          <div className="form-row">
+            {!activeSession && (
+              <button type="button" onClick={() => void handleStartSession()}>
+                Mulai Kerja
+              </button>
+            )}
+            {activeSession && activeSession.status === "active" && (
+              <button type="button" className="secondary" onClick={() => void handlePauseSession()}>
+                Istirahat
+              </button>
+            )}
+            {activeSession && activeSession.status === "paused" && (
+              <button type="button" className="secondary" onClick={() => void handleResumeSession()}>
+                Lanjutkan
+              </button>
+            )}
+            {activeSession && (
+              <button type="button" className="danger" onClick={() => void handleEndSession()}>
+                Akhiri
+              </button>
+            )}
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog open={endDialogOpen} onClose={() => setEndDialogOpen(false)} title="Selesai Order">
+        <div className="grid">
           <input
             type="number"
             min="0"
@@ -473,60 +495,95 @@ export function DriveClient() {
             value={earningsInput}
             onChange={(event) => setEarningsInput(event.target.value)}
           />
-          <button
-            type="button"
-            className="danger"
-            onPointerDown={() => handleHoldStart(() => void handleFinishOrder())}
-            onPointerUp={handleHoldCancel}
-            onPointerLeave={handleHoldCancel}
-            onPointerCancel={handleHoldCancel}
-          >
-            END ORDER
-          </button>
-        </div>
-        <div className="hold-hint">Tap & tahan 0,6 detik untuk selesai.</div>
-      </div>
-
-      {recommendations.length > 0 && (
-        <div className="card">
-          <h3>Rekomendasi Ngetem</h3>
-          <div className="stacked">
-            {recommendations.slice(0, 3).map((rec, index) => {
-              const [lat, lon] = cellToLatLng(rec.cell);
-              const dest = `${lat},${lon}`;
-              return (
-                <div key={rec.cell} className="list-item">
-                  <strong>Spot #{index + 1}</strong>
-                  <div className="helper-text">Score {rec.score.toFixed(2)}</div>
-                  <div className="helper-text">
-                    {rec.reasons.map((reason) => (
-                      <div key={reason}>• {reason}</div>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() =>
-                      window.open(
-                        `https://www.google.com/maps/dir/?api=1&destination=${dest}`,
-                        "_blank"
-                      )
-                    }
-                  >
-                    Navigasi
-                  </button>
-                </div>
-              );
-            })}
+          <div className="form-row">
+            {[5000, 10000, 20000].map((value) => (
+              <button key={value} type="button" className="secondary" onClick={() => handlePreset(value)}>
+                +{value.toLocaleString("id-ID")}
+              </button>
+            ))}
+          </div>
+          <div className="numpad">
+            {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => (
+              <button
+                key={digit}
+                type="button"
+                className="secondary"
+                onClick={() => appendEarningsDigit(digit)}
+              >
+                {digit}
+              </button>
+            ))}
+            <button type="button" className="secondary" onClick={() => appendEarningsDigit("0")}>
+              0
+            </button>
+            <button type="button" className="secondary" onClick={handleBackspace}>
+              ⌫
+            </button>
+            <button type="button" className="secondary" onClick={() => setEarningsInput("0")}>
+              C
+            </button>
+          </div>
+          <div className="form-row">
+            <button type="button" className="ghost" onClick={() => setNoteDialogOpen(true)}>
+              Catatan
+            </button>
+            <button type="button" onClick={() => void handleFinishOrder()}>
+              Simpan
+            </button>
           </div>
         </div>
-      )}
+      </Dialog>
 
-      {status && (
-        <div className="card">
-          <div className="helper-text">{status}</div>
+      <Dialog open={noteDialogOpen} onClose={() => setNoteDialogOpen(false)} title="Catatan">
+        <div className="grid">
+          <textarea
+            rows={3}
+            placeholder="Opsional"
+            value={orderNote}
+            onChange={(event) => setOrderNote(event.target.value)}
+          />
+          <div className="form-row">
+            <button type="button" className="secondary">
+              🎤 Mic
+            </button>
+            <button type="button" onClick={() => setNoteDialogOpen(false)}>
+              Simpan
+            </button>
+          </div>
         </div>
-      )}
+      </Dialog>
+
+      <Sheet open={ngetemOpen} onClose={() => setNgetemOpen(false)} title="Hasil Ngetem">
+        <div className="grid">
+          {recommendations.length === 0 && (
+            <div className="helper-text">Belum ada rekomendasi.</div>
+          )}
+          {recommendations.slice(0, 3).map((rec, index) => {
+            const [lat, lon] = cellToLatLng(rec.cell);
+            const dest = `${lat},${lon}`;
+            return (
+              <div key={rec.cell} className="kpi-card">
+                <strong>Spot #{index + 1}</strong>
+                <div className="helper-text">{rec.reasons.slice(0, 2).join(" • ")}</div>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() =>
+                    window.open(
+                      `https://www.google.com/maps/dir/?api=1&destination=${dest}`,
+                      "_blank"
+                    )
+                  }
+                >
+                  Navigasi
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </Sheet>
+
+      <Toast open={Boolean(status)} message={status ?? ""} onClose={() => setStatus(null)} />
     </div>
   );
 }

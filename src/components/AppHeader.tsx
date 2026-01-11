@@ -5,9 +5,11 @@ import { useNetworkStatus } from "../lib/useNetworkStatus";
 
 const titles: Record<string, string> = {
   "/heatmap": "Heatmap",
-  "/drive": "Drive Mode",
+  "/drive": "Drive",
   "/wallet": "Dompet",
-  "/import": "Import Maxim"
+  "/more": "More",
+  "/import": "Import",
+  "/session": "Ekspor"
 };
 
 export function AppHeader() {
@@ -18,8 +20,7 @@ export function AppHeader() {
   return (
     <header className="app-header">
       <div className="app-header-title">
-        <strong>{title ?? "Maxim Copilot Bandung"}</strong>
-        <span>Asisten pribadi driver</span>
+        <strong>{title ?? "Maxim Copilot"}</strong>
       </div>
       <div className={`status-pill ${isOnline ? "online" : "offline"}`}>
         {isOnline ? "Online" : "Offline"}

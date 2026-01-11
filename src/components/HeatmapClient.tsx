@@ -19,6 +19,8 @@ import { getOrFetchSignal, type SignalMeta } from "../lib/signals";
 import { useNetworkStatus } from "../lib/useNetworkStatus";
 import { regions, type RegionKey } from "../lib/regions";
 import { useLiveQueryState } from "../lib/useLiveQueryState";
+import { Sheet } from "./ui/Sheet";
+import { Toast } from "./ui/Toast";
 
 const tripSchema = z.object({
   startedAt: z.string().min(1, "Mulai wajib"),
@@ -87,6 +89,8 @@ export function HeatmapClient() {
     sessionId?: string;
   } | null>(null);
   const [earningsInput, setEarningsInput] = useState<string>("");
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [regionOpen, setRegionOpen] = useState(false);
 
   const { isOnline } = useNetworkStatus();
 
@@ -325,7 +329,7 @@ export function HeatmapClient() {
     setSettings(loaded);
   }
 
-  async function loadSignals(forceRefresh: boolean) {
+  async function loadPoiSignal(forceRefresh: boolean) {
     if (!isOnline) {
       setStatus(
         forceRefresh
@@ -333,7 +337,7 @@ export function HeatmapClient() {
           : "Offline. Menggunakan cache terakhir."
       );
     } else {
-      setStatus("Memuat sinyal POI & cuaca...");
+      setStatus("Memuat sinyal POI...");
     }
     try {
       const bbox = region.bbox.join(",");
@@ -364,32 +368,60 @@ export function HeatmapClient() {
         H3_RESOLUTION
       );
       setPoiGeoJson(h3CellsToGeoJSON(poiCells));
+      return poiResult.meta;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Gagal mengambil sinyal POI");
+      return null;
+    }
+  }
 
-      if (rainEnabled) {
-        const [lon, lat] = center;
-        const weatherKey = `weather:${lat.toFixed(3)},${lon.toFixed(3)}`;
-        const weatherResult = await getOrFetchSignal(
-          weatherKey,
-          CACHE_TTL,
-          async () => {
-            const response = await fetch(`/api/signals/weather?lat=${lat}&lon=${lon}`);
-            if (!response.ok) {
-              throw new Error("Gagal mengambil cuaca");
-            }
-            return (await response.json()) as WeatherSummary;
-          },
-          {
-            forceRefresh: forceRefresh && isOnline,
-            allowNetwork: isOnline,
-            allowStale: true
+  async function loadWeatherSignal(forceRefresh: boolean) {
+    if (!rainEnabled) {
+      setWeather(null);
+      setWeatherMeta(null);
+      return null;
+    }
+    if (!isOnline) {
+      setStatus(
+        forceRefresh
+          ? "Offline. Menampilkan cache terakhir (tanpa fetch)."
+          : "Offline. Menggunakan cache terakhir."
+      );
+    } else {
+      setStatus("Memuat sinyal cuaca...");
+    }
+    try {
+      const [lon, lat] = center;
+      const weatherKey = `weather:${lat.toFixed(3)},${lon.toFixed(3)}`;
+      const weatherResult = await getOrFetchSignal(
+        weatherKey,
+        CACHE_TTL,
+        async () => {
+          const response = await fetch(`/api/signals/weather?lat=${lat}&lon=${lon}`);
+          if (!response.ok) {
+            throw new Error("Gagal mengambil cuaca");
           }
-        );
-        setWeather(weatherResult.payload);
-        setWeatherMeta(weatherResult.meta);
-      } else {
-        setWeather(null);
-        setWeatherMeta(null);
-      }
+          return (await response.json()) as WeatherSummary;
+        },
+        {
+          forceRefresh: forceRefresh && isOnline,
+          allowNetwork: isOnline,
+          allowStale: true
+        }
+      );
+      setWeather(weatherResult.payload);
+      setWeatherMeta(weatherResult.meta);
+      return weatherResult.meta;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Gagal mengambil sinyal cuaca");
+      return null;
+    }
+  }
+
+  async function loadSignals(forceRefresh: boolean) {
+    try {
+      await loadPoiSignal(forceRefresh);
+      await loadWeatherSignal(forceRefresh);
       setStatus("Sinyal diperbarui.");
     } catch (error) {
       setStatus(
@@ -668,8 +700,6 @@ export function HeatmapClient() {
     } as const;
   }, [weather, rainEnabled]);
 
-  const poiCacheLabel = formatCacheLabel("Sinyal POI", poiMeta);
-  const weatherCacheLabel = formatCacheLabel("Cuaca", weatherMeta);
   const rainRiskValue = useMemo(() => getRainRiskNext3hValue(weather), [weather]);
   const sessionTripEarnings = useMemo(() => {
     if (!activeSession) {
@@ -686,297 +716,101 @@ export function HeatmapClient() {
       : null;
 
   return (
-    <div className="grid" style={{ gap: 24 }}>
-      <div className="card">
-        <h2 className="page-title">Heatmap Bandung</h2>
-        <p className="helper-text">
-          Peta heatmap local-first dari trip internal, POI, dan cuaca. Data tetap tersedia offline.
-        </p>
-        <div className="stacked" style={{ marginTop: 12 }}>
-          <div>
-            <strong>Wilayah</strong>
-            <div className="segment-group" style={{ marginTop: 8 }}>
-              {Object.entries(regions).map(([key, value]) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={`segment-button ${regionKey === key ? "active" : ""}`}
-                  onClick={() => setRegionKey(key as RegionKey)}
-                >
-                  {value.label.replace("Bandung ", "")}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <strong>Layer</strong>
-            <div className="toggle-row" style={{ marginTop: 8 }}>
-              <button
-                type="button"
-                className={internalEnabled ? "segment-button active" : "segment-button"}
-                onClick={() => setInternalEnabled((prev) => !prev)}
-              >
-                Internal
-              </button>
-              <button
-                type="button"
-                className={poiEnabled ? "segment-button active" : "segment-button"}
-                onClick={() => setPoiEnabled((prev) => !prev)}
-              >
-                POI
-              </button>
-              <button
-                type="button"
-                className={rainEnabled ? "segment-button active" : "segment-button"}
-                onClick={() => setRainEnabled((prev) => !prev)}
-              >
-                Cuaca
-              </button>
-            </div>
-          </div>
-          <div className="status-panel">
-            <div className="form-row">
-              <span className={`badge ${isOnline ? "success" : "danger"}`}>
-                {isOnline ? "Online" : "Offline"}
-              </span>
-              <span className="badge">{poiCacheLabel}</span>
-              <span className="badge">{weatherCacheLabel}</span>
-              {rainRisk && (
-                <span
-                  className={`badge ${rainRisk.variant === "danger" ? "danger" : "success"}`}
-                >
-                  {rainRisk.label}
-                </span>
-              )}
-            </div>
-            <div className="form-row">
-              <button type="button" className="ghost" onClick={() => void loadSignals(true)}>
-                Refresh Sinyal
-              </button>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => {
-                  const map = mapRef.current;
-                  if (!map) {
-                    return;
-                  }
-                  const [minLon, minLat, maxLon, maxLat] = region.bbox;
-                  map.fitBounds(
-                    [
-                      [minLon, minLat],
-                      [maxLon, maxLat]
-                    ],
-                    { padding: 20 }
-                  );
-                }}
-              >
-                Fit Area
-              </button>
-            </div>
-            {status && <div className="helper-text">{status}</div>}
-          </div>
-        </div>
-      </div>
-
-      <div className="map-wrapper" ref={mapContainerRef} />
-
-      <div className="card">
-        <div className="form-row" style={{ justifyContent: "space-between" }}>
-          <h3>Asisten Ngetem</h3>
-          <button
-            type="button"
-            className="ghost"
-            onClick={() => setAssistantOpen((prev) => !prev)}
-          >
-            {assistantOpen ? "Tutup" : "Buka"}
+    <div className="heatmap-screen">
+      <div className="heatmap-map" ref={mapContainerRef} />
+      <div className="heatmap-overlay">
+        <div className="heatmap-top">
+          <button type="button" className="chip" onClick={() => setRegionOpen(true)}>
+            Wilayah · {region.label.replace("Bandung ", "")}
           </button>
         </div>
-        {assistantOpen && (
-          <div className="grid" style={{ gap: 16 }}>
-            <div className="helper-text">
-              Top rekomendasi spot ngetem, alasan singkat, dan timer adaptif cuaca.
-            </div>
-            {activeSession && (
-              <div className="helper-text">
-                Jam aktif sesi: {sessionActiveHours ? sessionActiveHours.toFixed(2) : "0.00"} jam
-                • Pace sesi: {sessionPace ? `Rp ${sessionPace.toLocaleString("id-ID")}/jam` : "N/A"}
-              </div>
-            )}
-            <div className="form-row">
-              <button type="button" onClick={() => void handleStartNgetem()}>
-                Ngetem Now
-              </button>
-              {countdown !== null && countdown > 0 && (
-                <span className="badge">
-                  Sisa waktu: {Math.floor(countdown / 60)}:
-                  {String(countdown % 60).padStart(2, "0")}
-                </span>
-              )}
-              {countdown !== null && countdown <= 0 && (
-                <button type="button" className="ghost" onClick={() => void handleStartNgetem()}>
-                  Hitung ulang rekomendasi
-                </button>
-              )}
-            </div>
-            {myPos && (
-              <div className="helper-text">
-                Posisi: {myPos.lat.toFixed(5)}, {myPos.lon.toFixed(5)}
-              </div>
-            )}
-            <div className="grid" style={{ gap: 12 }}>
-              {recommendations.length === 0 && (
-                <div className="helper-text">Belum ada rekomendasi.</div>
-              )}
-              {recommendations.map((rec, index) => {
-                const [lat, lon] = cellToLatLng(rec.cell);
-                const dest = `${lat},${lon}`;
-                return (
-                  <div key={rec.cell} className="card" style={{ padding: 16 }}>
-                    <div className="form-row" style={{ justifyContent: "space-between" }}>
-                      <strong>Spot #{index + 1}</strong>
-                      <span className="badge">Score {rec.score.toFixed(2)}</span>
-                    </div>
-                    <div className="helper-text">
-                      {rec.reasons.map((reason) => (
-                        <div key={reason}>• {reason}</div>
-                      ))}
-                    </div>
-                    <div className="form-row">
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={() => {
-                          window.open(
-                            `https://www.google.com/maps/dir/?api=1&destination=${dest}`,
-                            "_blank"
-                          );
-                        }}
-                      >
-                        Navigasi
-                      </button>
-                      <span className="helper-text">
-                        {lat.toFixed(5)}, {lon.toFixed(5)}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="card" style={{ padding: 16 }}>
-              <h4>Input Trip Cepat</h4>
-              <div className="form-row">
-                <button type="button" onClick={() => void handleStartOrder()}>
-                  Mulai order
-                </button>
-                {draftTripStart && (
-                  <span className="badge">
-                    Mulai{" "}
-                    {new Date(draftTripStart.startedAt).toLocaleTimeString("id-ID")}
-                  </span>
-                )}
-              </div>
-              <div className="form-row">
-                <input
-                  type="number"
-                  min="0"
-                  step="1000"
-                  placeholder="Pendapatan (Rp)"
-                  value={earningsInput}
-                  onChange={(event) => setEarningsInput(event.target.value)}
-                />
-                <button type="button" onClick={() => void handleFinishOrder()}>
-                  Selesai order
-                </button>
-              </div>
-              <div className="helper-text">
-                Learning ringan aktif. Bobot akan disesuaikan setelah order selesai.
-              </div>
-            </div>
-            <div className="helper-text">
-              Rain risk 3 jam ke depan: {(rainRiskValue * 100).toFixed(0)}%
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="card grid two">
-        <div>
-          <h3>Legend</h3>
-          <div className="legend">
-            <span>Low</span>
-            <div className="legend-scale" />
-            <span>High</span>
-          </div>
-          <p className="helper-text">
-            Heatmap internal berbasis pendapatan trip. POI dihitung dari kepadatan titik.
-          </p>
-        </div>
-        <div>
-          <h3>Ringkas</h3>
-          <p className="helper-text">
-            Trip tersimpan: <strong>{trips.length}</strong>
-          </p>
-          <p className="helper-text">Wilayah aktif: {region.label}</p>
+        <div className="heatmap-fabs">
+          <button type="button" className="fab secondary" onClick={() => setLayersOpen(true)}>
+            ☰
+          </button>
+          <button type="button" className="fab" onClick={() => void loadSignals(true)}>
+            ↻
+          </button>
         </div>
       </div>
-
-      <div className="card">
-        <h3>Input Trip Manual</h3>
-        <form className="grid" onSubmit={handleAddTrip}>
+      <Sheet open={layersOpen} onClose={() => setLayersOpen(false)} title="Layers & Sinyal">
+        <div className="grid">
           <div className="form-row">
-            <div>
-              <label>Mulai</label>
-              <input
-                type="datetime-local"
-                name="startedAt"
-                defaultValue={new Date(Date.now() - 60 * 60 * 1000)
-                  .toISOString()
-                  .slice(0, 16)}
-                required
-              />
+            <button
+              type="button"
+              className={`chip ${internalEnabled ? "active" : ""}`}
+              onClick={() => setInternalEnabled((prev) => !prev)}
+            >
+              Internal
+            </button>
+            <button
+              type="button"
+              className={`chip ${poiEnabled ? "active" : ""}`}
+              onClick={() => setPoiEnabled((prev) => !prev)}
+            >
+              POI
+            </button>
+            <button
+              type="button"
+              className={`chip ${rainEnabled ? "active" : ""}`}
+              onClick={() => setRainEnabled((prev) => !prev)}
+            >
+              Cuaca
+            </button>
+          </div>
+          <div className="grid">
+            <div className="helper-text">
+              Internal: {getCacheStatusLabel(null)}
             </div>
-            <div>
-              <label>Selesai</label>
-              <input
-                type="datetime-local"
-                name="endedAt"
-                defaultValue={new Date().toISOString().slice(0, 16)}
-                required
-              />
+            <div className="helper-text">
+              POI: {getCacheStatusLabel(poiMeta)}
             </div>
-            <div>
-              <label>Pendapatan (Rp)</label>
-              <input type="number" name="earnings" min="0" step="1000" required />
+            <div className="helper-text">
+              Cuaca: {getCacheStatusLabel(weatherMeta)}
             </div>
           </div>
           <div className="form-row">
-            <div>
-              <label>Start Lat</label>
-              <input type="number" name="startLat" step="0.0001" required />
-            </div>
-            <div>
-              <label>Start Lon</label>
-              <input type="number" name="startLon" step="0.0001" required />
-            </div>
-            <div>
-              <label>End Lat</label>
-              <input type="number" name="endLat" step="0.0001" required />
-            </div>
-            <div>
-              <label>End Lon</label>
-              <input type="number" name="endLon" step="0.0001" required />
-            </div>
+            <button type="button" className="secondary" onClick={() => void loadPoiSignal(true)}>
+              Refresh POI
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void loadWeatherSignal(true)}
+            >
+              Refresh Cuaca
+            </button>
           </div>
-          <div>
-            <label>Catatan</label>
-            <textarea name="note" rows={2} />
-          </div>
-          <div>
-            <button type="submit">Simpan Trip</button>
-          </div>
-        </form>
-      </div>
+          {poiMeta?.lastErrorMessage && (
+            <div className="helper-text">
+              POI gagal: {poiMeta.lastErrorMessage}
+              <div style={{ marginTop: 8 }}>
+                <button type="button" className="ghost" onClick={() => void loadPoiSignal(true)}>
+                  Coba lagi
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Sheet>
+      <Sheet open={regionOpen} onClose={() => setRegionOpen(false)} title="Wilayah">
+        <div className="segment-group">
+          {Object.entries(regions).map(([key, value]) => (
+            <button
+              key={key}
+              type="button"
+              className={`segment-button ${regionKey === key ? "active" : ""}`}
+              onClick={() => {
+                setRegionKey(key as RegionKey);
+                setRegionOpen(false);
+              }}
+            >
+              {value.label.replace("Bandung ", "")}
+            </button>
+          ))}
+        </div>
+      </Sheet>
+      <Toast open={Boolean(status)} message={status ?? ""} onClose={() => setStatus(null)} />
     </div>
   );
 }
@@ -996,4 +830,20 @@ function formatCacheLabel(label: string, meta: SignalMeta | null) {
     return `${label}: cached (stale ${hours} jam)`;
   }
   return `${label}: cached ${hours} jam`;
+}
+
+function getCacheStatusLabel(meta: SignalMeta | null) {
+  if (!meta || meta.ageSeconds === null) {
+    return "Cached";
+  }
+  if (meta.lastErrorMessage) {
+    return "Failed";
+  }
+  if (meta.isFresh && !meta.fromCache) {
+    return "Fresh";
+  }
+  if (meta.isStale) {
+    return "Stale";
+  }
+  return "Cached";
 }
