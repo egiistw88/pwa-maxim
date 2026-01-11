@@ -175,8 +175,8 @@ export function ImportClient() {
         const finalEarnings = isCompleted && Number.isFinite(earnings) ? earnings : 0;
         const trip: Trip = {
           id: nanoid(),
-          startedAt: startedAt.toISOString(),
-          endedAt: completedAt.toISOString(),
+          startedAt: startedAt.getTime(),
+          endedAt: completedAt.getTime(),
           startLat: null,
           startLon: null,
           endLat: null,
@@ -191,10 +191,10 @@ export function ImportClient() {
         if (isCompleted && finalEarnings > 0 && settings?.autoAddIncomeFromTrips) {
           txToAdd.push({
             id: nanoid(),
-            createdAt: completedAt.toISOString(),
+            createdAt: completedAt.getTime(),
             type: "income",
             amount: finalEarnings,
-            category: "Order",
+            category: settings?.defaultIncomeCategory ?? "Order",
             note: buildTripNote(row),
             sessionId: latestSession?.id
           });

@@ -89,7 +89,7 @@ export function HeatmapClient() {
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [sessionActiveMinutes, setSessionActiveMinutes] = useState<number | null>(null);
   const [draftTripStart, setDraftTripStart] = useState<{
-    startedAt: string;
+    startedAt: number;
     startLat: number;
     startLon: number;
     predictedScoreAtStart: number;
@@ -100,6 +100,7 @@ export function HeatmapClient() {
   const [regionOpen, setRegionOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [mapInitKey, setMapInitKey] = useState(0);
+  const [mapErrorMessage, setMapErrorMessage] = useState<string | null>(null);
 
   const { isOnline } = useNetworkStatus();
 
@@ -117,6 +118,7 @@ export function HeatmapClient() {
       mapRef.current = null;
     }
     mapErrorRef.current = false;
+    setMapErrorMessage(null);
     setMapInitKey((prev) => prev + 1);
   }
 
@@ -192,12 +194,27 @@ export function HeatmapClient() {
 
       map.addControl(new maplibregl.NavigationControl(), "top-right");
 
+      const scheduleResize = () => {
+        requestAnimationFrame(() => map.resize());
+        window.setTimeout(() => map.resize(), 150);
+        window.setTimeout(() => map.resize(), 600);
+      };
+
+      const handleWindowResize = () => {
+        map.resize();
+      };
+
+      const handleOrientationChange = () => {
+        window.setTimeout(() => map.resize(), 250);
+      };
+
       map.on("error", (event) => {
         if (mapErrorRef.current) {
           return;
         }
         mapErrorRef.current = true;
         console.error("Map error", event.error);
+        setMapErrorMessage("Peta gagal dimuat. Tap untuk coba lagi.");
         showStatus("Map gagal dimuat.", "error", {
           actionLabel: "Coba lagi",
           onAction: () => handleMapRetry()
@@ -206,6 +223,7 @@ export function HeatmapClient() {
 
       map.on("load", () => {
         mapErrorRef.current = false;
+        setMapErrorMessage(null);
         map.addSource("internal", {
           type: "geojson",
           data: internalGeoJson
@@ -264,16 +282,24 @@ export function HeatmapClient() {
         });
 
         console.log("map loaded", map.getStyle()?.sources);
+        scheduleResize();
       });
+
+      scheduleResize();
+      window.addEventListener("resize", handleWindowResize);
+      window.addEventListener("orientationchange", handleOrientationChange);
 
       mapRef.current = map;
 
       return () => {
+        window.removeEventListener("resize", handleWindowResize);
+        window.removeEventListener("orientationchange", handleOrientationChange);
         map.remove();
         mapRef.current = null;
       };
     } catch (error) {
       console.error("Map init error", error);
+      setMapErrorMessage("Peta gagal dimuat. Tap untuk coba lagi.");
       showStatus("Map gagal dimuat.", "error", {
         actionLabel: "Coba lagi",
         onAction: () => handleMapRetry()
@@ -533,8 +559,8 @@ export function HeatmapClient() {
 
     const trip: Trip = {
       id: nanoid(),
-      startedAt: new Date(parsed.data.startedAt).toISOString(),
-      endedAt: new Date(parsed.data.endedAt).toISOString(),
+      startedAt: new Date(parsed.data.startedAt).getTime(),
+      endedAt: new Date(parsed.data.endedAt).getTime(),
       startLat: parsed.data.startLat,
       startLon: parsed.data.startLon,
       endLat: parsed.data.endLat,
@@ -700,7 +726,7 @@ export function HeatmapClient() {
       const predictedScoreAtStart = recommendations[0]?.score ?? 0;
       const activeSessionId = activeSession?.id;
       setDraftTripStart({
-        startedAt: new Date().toISOString(),
+        startedAt: Date.now(),
         startLat: position.lat,
         startLon: position.lon,
         predictedScoreAtStart,
@@ -728,7 +754,7 @@ export function HeatmapClient() {
     try {
       showStatus("Mengambil lokasi selesai order...");
       const position = await getCurrentPosition();
-      const endedAt = new Date().toISOString();
+      const endedAt = Date.now();
       const trip: Trip = {
         id: nanoid(),
         startedAt: draftTripStart.startedAt,
@@ -750,7 +776,7 @@ export function HeatmapClient() {
             createdAt: endedAt,
             type: "income",
             amount: earningsValue,
-            category: "Order",
+            category: settings?.defaultIncomeCategory ?? "Order",
             note: "Order (Heatmap)",
             sessionId: tripWithSession.sessionId
           };
@@ -818,6 +844,11 @@ export function HeatmapClient() {
   return (
     <div className="heatmap-screen">
       <div className="heatmap-map" ref={mapContainerRef} />
+      {mapErrorMessage && (
+        <button type="button" className="heatmap-error" onClick={handleMapRetry}>
+          {mapErrorMessage}
+        </button>
+      )}
       <div className="heatmap-overlay">
         <div className="heatmap-top">
           <button type="button" className="btn chip" onClick={() => setRegionOpen(true)}>

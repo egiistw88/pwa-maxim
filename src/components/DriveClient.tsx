@@ -67,7 +67,7 @@ export function DriveClient() {
   const [ngetemOpen, setNgetemOpen] = useState(false);
   const [orderNote, setOrderNote] = useState("");
   const [draftTripStart, setDraftTripStart] = useState<{
-    startedAt: string;
+    startedAt: number;
     startLat: number;
     startLon: number;
     predictedScoreAtStart: number;
@@ -192,7 +192,7 @@ export function DriveClient() {
       const predictedScoreAtStart = recommendations[0]?.score ?? 0;
       const activeSessionId = activeSession?.id;
       setDraftTripStart({
-        startedAt: new Date().toISOString(),
+        startedAt: Date.now(),
         startLat: position.lat,
         startLon: position.lon,
         predictedScoreAtStart,
@@ -222,7 +222,7 @@ export function DriveClient() {
       showStatus("Mengambil lokasi selesai order...");
       const position = await getCurrentPosition();
       setGpsStatus("GPS siap");
-      const endedAt = new Date().toISOString();
+      const endedAt = Date.now();
       const trip: Trip = {
         id: nanoid(),
         startedAt: draftTripStart.startedAt,
@@ -245,7 +245,7 @@ export function DriveClient() {
             createdAt: endedAt,
             type: "income",
             amount: earningsValue,
-            category: "Order",
+            category: settings?.defaultIncomeCategory ?? "Order",
             note: "Order (Drive Mode)",
             sessionId: tripWithSession.sessionId
           };
