@@ -19,11 +19,29 @@ export function Dialog({
   children
 }: DialogProps) {
   const [mounted, setMounted] = useState(false);
+  const [shouldRender, setShouldRender] = useState(open);
+  const [isExiting, setIsExiting] = useState(false);
   const canDismiss = dismissible !== false && !!onClose;
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (open) {
+      setShouldRender(true);
+      setIsExiting(false);
+      return;
+    }
+    if (!open && shouldRender) {
+      setIsExiting(true);
+      const timer = window.setTimeout(() => {
+        setShouldRender(false);
+        setIsExiting(false);
+      }, 120);
+      return () => window.clearTimeout(timer);
+    }
+  }, [open, shouldRender]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -37,29 +55,34 @@ export function Dialog({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose, canDismiss]);
 
-  if (!mounted || !open) {
+  if (!mounted || !shouldRender) {
     return null;
   }
 
   return createPortal(
-    <div className="dialog-backdrop" onClick={canDismiss ? onClose : undefined}>
-      <div className="dialog" onClick={(event) => event.stopPropagation()}>
-        {(title || onClose) && (
-          <div className="dialog-header">
-            {title ? <strong>{title}</strong> : <span />}
-            {onClose ? (
-              <button
-                type="button"
-                className="ghost"
-                onClick={onClose}
-                aria-label="Close dialog"
-              >
-                ✕
-              </button>
-            ) : null}
-          </div>
-        )}
-        <div className="dialog-body">{children}</div>
+    <div className={isExiting ? "dialog-exit" : ""}>
+      <div className="dialog-backdrop" onClick={canDismiss ? onClose : undefined}>
+        <div
+          className="dialog dialog-panel"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {(title || onClose) && (
+            <div className="dialog-header">
+              {title ? <strong>{title}</strong> : <span />}
+              {onClose ? (
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={onClose}
+                  aria-label="Close dialog"
+                >
+                  ✕
+                </button>
+              ) : null}
+            </div>
+          )}
+          <div className="dialog-body">{children}</div>
+        </div>
       </div>
     </div>,
     document.body

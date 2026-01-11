@@ -135,26 +135,26 @@ export function SessionBar() {
         </div>
         <div className="form-row">
           {!session && (
-            <button type="button" onClick={() => setIsModalOpen(true)}>
+            <button type="button" className="btn primary" onClick={() => setIsModalOpen(true)}>
               Mulai Kerja
             </button>
           )}
           {session?.status === "active" && (
             <>
-              <button type="button" className="secondary" onClick={() => void handlePause()}>
+              <button type="button" className="btn secondary" onClick={() => void handlePause()}>
                 Istirahat
               </button>
-              <button type="button" className="ghost" onClick={() => void handleEnd()}>
+              <button type="button" className="btn ghost" onClick={() => void handleEnd()}>
                 Pulang
               </button>
             </>
           )}
           {session?.status === "paused" && (
             <>
-              <button type="button" onClick={() => void handleResume()}>
+              <button type="button" className="btn primary" onClick={() => void handleResume()}>
                 Lanjut
               </button>
-              <button type="button" className="ghost" onClick={() => void handleEnd()}>
+              <button type="button" className="btn ghost" onClick={() => void handleEnd()}>
                 Pulang
               </button>
             </>
@@ -189,10 +189,10 @@ export function SessionBar() {
             </div>
           </div>
           <div className="form-row" style={{ marginTop: 12 }}>
-            <button type="button" onClick={() => void handleStart()}>
+            <button type="button" className="btn primary" onClick={() => void handleStart()}>
               Mulai Kerja
             </button>
-            <button type="button" className="ghost" onClick={() => setIsModalOpen(false)}>
+            <button type="button" className="btn ghost" onClick={() => setIsModalOpen(false)}>
               Batal
             </button>
           </div>

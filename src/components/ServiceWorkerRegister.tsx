@@ -53,7 +53,7 @@ export function ServiceWorkerRegister() {
       <span>Update tersedia.</span>
       <button
         type="button"
-        className="secondary"
+        className="btn secondary"
         onClick={() => {
           registration.waiting?.postMessage({ type: "SKIP_WAITING" });
         }}

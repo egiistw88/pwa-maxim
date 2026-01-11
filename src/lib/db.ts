@@ -41,6 +41,7 @@ export type Settings = {
   weights: Record<string, number>;
   autoAttachToActiveSession: boolean;
   autoAddIncomeFromTrips: boolean;
+  hapticsEnabled: boolean;
   defaultBreakMinutes: number;
   baseAreaKey: string;
 };
@@ -61,6 +62,7 @@ export const defaultSettings: Settings = {
   weights: defaultWeights(),
   autoAttachToActiveSession: true,
   autoAddIncomeFromTrips: true,
+  hapticsEnabled: true,
   defaultBreakMinutes: 30,
   baseAreaKey: "timur"
 };

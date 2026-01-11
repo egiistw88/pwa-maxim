@@ -88,13 +88,13 @@ export function MoreClient() {
     <div className="grid" style={{ gap: 12 }}>
       <div className="card">
         <div className="list">
-          <button type="button" className="list-item" onClick={() => setImportOpen(true)}>
+          <button type="button" className="btn list-item" onClick={() => setImportOpen(true)}>
             Import CSV
           </button>
-          <button type="button" className="list-item" onClick={() => setExportOpen(true)}>
+          <button type="button" className="btn list-item" onClick={() => setExportOpen(true)}>
             Ekspor CSV
           </button>
-          <button type="button" className="list-item" onClick={() => setSettingsOpen(true)}>
+          <button type="button" className="btn list-item" onClick={() => setSettingsOpen(true)}>
             Settings
           </button>
         </div>
@@ -127,7 +127,7 @@ export function MoreClient() {
                 <button
                   key={value}
                   type="button"
-                  className="secondary"
+                  className="btn secondary"
                   onClick={() => updateSettings({ dailyTargetNet: value })}
                 >
                   {formatCurrency(value)}
@@ -148,7 +148,7 @@ export function MoreClient() {
             <div className="form-row">
               <button
                 type="button"
-                className="secondary"
+                className="btn secondary"
                 disabled={estimateValue === null}
                 onClick={() =>
                   updateSettings({
@@ -162,7 +162,7 @@ export function MoreClient() {
               </button>
               <button
                 type="button"
-                className="secondary"
+                className="btn secondary"
                 onClick={() => updateSettings({ costPerKmEstimateMethod: "manual" })}
               >
                 Manual
@@ -189,17 +189,37 @@ export function MoreClient() {
             <div className="form-row">
               <button
                 type="button"
-                className={`chip ${normalizedSettings.distanceMode === "trip-only" ? "active" : ""}`}
+                className={`btn chip ${normalizedSettings.distanceMode === "trip-only" ? "active" : ""}`}
                 onClick={() => updateSettings({ distanceMode: "trip-only" })}
               >
                 Trip
               </button>
               <button
                 type="button"
-                className={`chip ${normalizedSettings.distanceMode === "trip+deadhead" ? "active" : ""}`}
+                className={`btn chip ${normalizedSettings.distanceMode === "trip+deadhead" ? "active" : ""}`}
                 onClick={() => updateSettings({ distanceMode: "trip+deadhead" })}
               >
                 Trip + Deadhead
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div className="helper-text">Haptic feedback</div>
+            <div className="form-row">
+              <button
+                type="button"
+                className={`btn chip ${normalizedSettings.hapticsEnabled ? "active" : ""}`}
+                onClick={() => updateSettings({ hapticsEnabled: true })}
+              >
+                Aktif
+              </button>
+              <button
+                type="button"
+                className={`btn chip ${!normalizedSettings.hapticsEnabled ? "active" : ""}`}
+                onClick={() => updateSettings({ hapticsEnabled: false })}
+              >
+                Mati
               </button>
             </div>
           </div>

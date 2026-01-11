@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { db, type Settings, type Trip, type WalletTx } from "../lib/db";
+import { haptic } from "../lib/haptics";
 import { getSettings, updateSettings } from "../lib/settings";
 import { useLiveQueryState } from "../lib/useLiveQueryState";
 
@@ -93,6 +94,21 @@ export function ImportClient() {
   const settings = useLiveQueryState(async () => {
     return getSettings();
   }, [], null as Settings | null);
+  const hapticsEnabled = settings?.hapticsEnabled ?? true;
+
+  function reportStatus(message: string) {
+    setStatus(message);
+    if (hapticsEnabled) {
+      haptic("success");
+    }
+  }
+
+  function reportError(message: string) {
+    setError(message);
+    if (hapticsEnabled) {
+      haptic("error");
+    }
+  }
 
   const summary = useMemo(() => {
     const completed = rows.filter((row) => row.status.toLowerCase() === "completed");
@@ -124,9 +140,7 @@ export function ImportClient() {
       normalizedHeaders.length === EXPECTED_HEADERS.length &&
       EXPECTED_HEADERS.every((header, index) => header === normalizedHeaders[index]);
     if (!headerMatch) {
-      setError(
-        `Header CSV tidak sesuai. Harus: ${EXPECTED_HEADERS.join(", ")}`
-      );
+      reportError(`Header CSV tidak sesuai. Harus: ${EXPECTED_HEADERS.join(", ")}`);
       setRows([]);
       return;
     }
@@ -135,7 +149,7 @@ export function ImportClient() {
 
   async function handleImport() {
     if (rows.length === 0) {
-      setError("Tidak ada data untuk diimport.");
+      reportError("Tidak ada data untuk diimport.");
       return;
     }
     setIsImporting(true);
@@ -195,12 +209,14 @@ export function ImportClient() {
           await db.wallet_tx.bulkAdd(txToAdd);
         }
       });
-      setStatus(`Import sukses: ${tripsToAdd.length} trip disimpan.`);
+      reportStatus(`Import sukses: ${tripsToAdd.length} trip disimpan.`);
       setTimeout(() => {
         router.push("/wallet");
       }, 800);
     } catch (importError) {
-      setError(importError instanceof Error ? importError.message : "Gagal import CSV.");
+      reportError(
+        importError instanceof Error ? importError.message : "Gagal import CSV."
+      );
     } finally {
       setIsImporting(false);
     }
@@ -244,7 +260,12 @@ export function ImportClient() {
         <div className="helper-text">
           Total earnings (completed): Rp {summary.totalEarnings.toLocaleString("id-ID")}
         </div>
-        <button type="button" onClick={() => void handleImport()} disabled={isImporting}>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={() => void handleImport()}
+          disabled={isImporting}
+        >
           {isImporting ? "Mengimpor..." : "Import Sekarang"}
         </button>
         {status && <div className="helper-text">{status}</div>}
