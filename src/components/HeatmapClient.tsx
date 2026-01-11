@@ -2,7 +2,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from "maplibre-gl";
+import type { GeoJSONSource, Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
 import { nanoid } from "nanoid";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
@@ -100,7 +100,12 @@ export function HeatmapClient() {
   const [regionOpen, setRegionOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [mapInitKey, setMapInitKey] = useState(0);
-  const [mapErrorMessage, setMapErrorMessage] = useState<string | null>(null);
+  const [mapError, setMapError] = useState<string | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [mapSupported, setMapSupported] = useState<boolean | null>(null);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [containerSize, setContainerSize] = useState("0x0");
+  const [canvasFound, setCanvasFound] = useState(false);
 
   const { isOnline } = useNetworkStatus();
 
@@ -108,6 +113,7 @@ export function HeatmapClient() {
   const mapRef = useRef<MapLibreMap | null>(null);
   const timerRef = useRef<number | null>(null);
   const mapErrorRef = useRef(false);
+  const debugHoldRef = useRef<number | null>(null);
 
   const region = regions[regionKey];
   const hapticsEnabled = settings?.hapticsEnabled ?? true;
@@ -118,8 +124,36 @@ export function HeatmapClient() {
       mapRef.current = null;
     }
     mapErrorRef.current = false;
-    setMapErrorMessage(null);
+    setMapError(null);
+    setMapReady(false);
+    setMapSupported(null);
     setMapInitKey((prev) => prev + 1);
+  }
+
+  function updateMapDiagnostics() {
+    const rect = mapContainerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setContainerSize(`${Math.round(rect.width)}x${Math.round(rect.height)}`);
+    }
+    setCanvasFound(Boolean(mapContainerRef.current?.querySelector("canvas")));
+  }
+
+  function startDebugHold() {
+    if (debugHoldRef.current) {
+      return;
+    }
+    debugHoldRef.current = window.setTimeout(() => {
+      setDebugOpen((prev) => !prev);
+      debugHoldRef.current = null;
+    }, 800);
+  }
+
+  function clearDebugHold() {
+    if (!debugHoldRef.current) {
+      return;
+    }
+    window.clearTimeout(debugHoldRef.current);
+    debugHoldRef.current = null;
   }
 
   function showStatus(
@@ -180,132 +214,172 @@ export function HeatmapClient() {
   }, [activeSession]);
 
   useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) {
-      return;
-    }
+    let cleanup = () => {};
+    let isCancelled = false;
 
-    try {
-      const map = new maplibregl.Map({
-        container: mapContainerRef.current,
-        style: mapStyle,
-        center,
-        zoom: 12
-      });
+    const initMap = async () => {
+      if (!mapContainerRef.current || mapRef.current) {
+        return;
+      }
 
-      map.addControl(new maplibregl.NavigationControl(), "top-right");
-
-      const scheduleResize = () => {
-        requestAnimationFrame(() => map.resize());
-        window.setTimeout(() => map.resize(), 150);
-        window.setTimeout(() => map.resize(), 600);
-      };
-
-      const handleWindowResize = () => {
-        map.resize();
-      };
-
-      const handleOrientationChange = () => {
-        window.setTimeout(() => map.resize(), 250);
-      };
-
-      map.on("error", (event) => {
-        if (mapErrorRef.current) {
+      try {
+        const maplibre = await import("maplibre-gl");
+        if (isCancelled) {
           return;
         }
-        mapErrorRef.current = true;
-        console.error("Map error", event.error);
-        setMapErrorMessage("Peta gagal dimuat. Tap untuk coba lagi.");
+        const supported = maplibre.supported?.() ?? true;
+        setMapSupported(supported);
+        updateMapDiagnostics();
+        if (!supported) {
+          setMapError("WebGL tidak didukung di perangkat ini.");
+          setMapReady(false);
+          return;
+        }
+
+        const map = new maplibre.Map({
+          container: mapContainerRef.current,
+          style: mapStyle,
+          center,
+          zoom: 12,
+          attributionControl: false
+        });
+
+        map.addControl(new maplibre.NavigationControl({ showCompass: false }), "top-right");
+
+        const resize = () => {
+          map.resize();
+          updateMapDiagnostics();
+        };
+
+        const scheduleResize = () => {
+          requestAnimationFrame(resize);
+          window.setTimeout(resize, 150);
+          window.setTimeout(resize, 600);
+        };
+
+        const handleWindowResize = () => {
+          resize();
+        };
+
+        const handleOrientationChange = () => {
+          window.setTimeout(resize, 250);
+        };
+
+        map.on("error", (event) => {
+          if (mapErrorRef.current) {
+            return;
+          }
+          mapErrorRef.current = true;
+          console.error("MapLibre error", event.error);
+          const message =
+            event?.error?.message ?? "Peta gagal dimuat. Tap untuk coba lagi.";
+          setMapError(message);
+          setMapReady(false);
+          showStatus("Map gagal dimuat.", "error", {
+            actionLabel: "Coba lagi",
+            onAction: () => handleMapRetry()
+          });
+        });
+
+        map.on("load", () => {
+          mapErrorRef.current = false;
+          setMapReady(true);
+          setMapError(null);
+          map.addSource("internal", {
+            type: "geojson",
+            data: internalGeoJson
+          });
+          map.addSource("poi", {
+            type: "geojson",
+            data: poiGeoJson
+          });
+
+          map.addLayer({
+            id: "internal-heat",
+            type: "heatmap",
+            source: "internal",
+            paint: {
+              "heatmap-weight": ["get", "intensity"],
+              "heatmap-radius": 32,
+              "heatmap-intensity": 1,
+              "heatmap-color": [
+                "interpolate",
+                ["linear"],
+                ["heatmap-density"],
+                0,
+                "rgba(191, 219, 254, 0)",
+                0.4,
+                "#93c5fd",
+                0.7,
+                "#3b82f6",
+                1,
+                "#1d4ed8"
+              ]
+            }
+          });
+
+          map.addLayer({
+            id: "poi-heat",
+            type: "heatmap",
+            source: "poi",
+            paint: {
+              "heatmap-weight": ["get", "intensity"],
+              "heatmap-radius": 26,
+              "heatmap-intensity": 0.8,
+              "heatmap-color": [
+                "interpolate",
+                ["linear"],
+                ["heatmap-density"],
+                0,
+                "rgba(187, 247, 208, 0)",
+                0.5,
+                "#86efac",
+                0.8,
+                "#22c55e",
+                1,
+                "#16a34a"
+              ]
+            }
+          });
+
+          scheduleResize();
+        });
+
+        scheduleResize();
+        updateMapDiagnostics();
+        window.addEventListener("resize", handleWindowResize);
+        window.addEventListener("orientationchange", handleOrientationChange);
+
+        mapRef.current = map;
+
+        cleanup = () => {
+          window.removeEventListener("resize", handleWindowResize);
+          window.removeEventListener("orientationchange", handleOrientationChange);
+          map.remove();
+          mapRef.current = null;
+        };
+      } catch (error) {
+        console.error("Map init error", error);
+        setMapError(
+          error instanceof Error
+            ? error.message
+            : "Peta gagal dimuat. Tap untuk coba lagi."
+        );
+        setMapReady(false);
         showStatus("Map gagal dimuat.", "error", {
           actionLabel: "Coba lagi",
           onAction: () => handleMapRetry()
         });
-      });
-
-      map.on("load", () => {
-        mapErrorRef.current = false;
-        setMapErrorMessage(null);
-        map.addSource("internal", {
-          type: "geojson",
-          data: internalGeoJson
-        });
-        map.addSource("poi", {
-          type: "geojson",
-          data: poiGeoJson
-        });
-
-        map.addLayer({
-          id: "internal-heat",
-          type: "heatmap",
-          source: "internal",
-          paint: {
-            "heatmap-weight": ["get", "intensity"],
-            "heatmap-radius": 32,
-            "heatmap-intensity": 1,
-            "heatmap-color": [
-              "interpolate",
-              ["linear"],
-              ["heatmap-density"],
-              0,
-              "rgba(191, 219, 254, 0)",
-              0.4,
-              "#93c5fd",
-              0.7,
-              "#3b82f6",
-              1,
-              "#1d4ed8"
-            ]
-          }
-        });
-
-        map.addLayer({
-          id: "poi-heat",
-          type: "heatmap",
-          source: "poi",
-          paint: {
-            "heatmap-weight": ["get", "intensity"],
-            "heatmap-radius": 26,
-            "heatmap-intensity": 0.8,
-            "heatmap-color": [
-              "interpolate",
-              ["linear"],
-              ["heatmap-density"],
-              0,
-              "rgba(187, 247, 208, 0)",
-              0.5,
-              "#86efac",
-              0.8,
-              "#22c55e",
-              1,
-              "#16a34a"
-            ]
-          }
-        });
-
-        console.log("map loaded", map.getStyle()?.sources);
-        scheduleResize();
-      });
-
-      scheduleResize();
-      window.addEventListener("resize", handleWindowResize);
-      window.addEventListener("orientationchange", handleOrientationChange);
-
-      mapRef.current = map;
-
-      return () => {
-        window.removeEventListener("resize", handleWindowResize);
-        window.removeEventListener("orientationchange", handleOrientationChange);
-        map.remove();
         mapRef.current = null;
-      };
-    } catch (error) {
-      console.error("Map init error", error);
-      setMapErrorMessage("Peta gagal dimuat. Tap untuk coba lagi.");
-      showStatus("Map gagal dimuat.", "error", {
-        actionLabel: "Coba lagi",
-        onAction: () => handleMapRetry()
-      });
-      mapRef.current = null;
-    }
+      }
+    };
+
+    void initMap();
+
+    return () => {
+      isCancelled = true;
+      cleanup();
+    };
   }, [center, mapInitKey]);
 
   useEffect(() => {
@@ -314,7 +388,7 @@ export function HeatmapClient() {
       return;
     }
 
-    const source = map.getSource("internal") as maplibregl.GeoJSONSource | undefined;
+    const source = map.getSource("internal") as GeoJSONSource | undefined;
     if (source) {
       source.setData(internalGeoJson);
     }
@@ -326,7 +400,7 @@ export function HeatmapClient() {
       return;
     }
 
-    const source = map.getSource("poi") as maplibregl.GeoJSONSource | undefined;
+    const source = map.getSource("poi") as GeoJSONSource | undefined;
     if (source) {
       source.setData(poiGeoJson);
     }
@@ -843,29 +917,87 @@ export function HeatmapClient() {
 
   return (
     <div className="heatmap-screen">
-      <div className="heatmap-map" ref={mapContainerRef} />
-      {mapErrorMessage && (
-        <button type="button" className="heatmap-error" onClick={handleMapRetry}>
-          {mapErrorMessage}
-        </button>
-      )}
-      <div className="heatmap-overlay">
-        <div className="heatmap-top">
-          <button type="button" className="btn chip" onClick={() => setRegionOpen(true)}>
-            Wilayah · {region.label.replace("Bandung ", "")}
-          </button>
-        </div>
-        <div className="heatmap-fabs">
-          <button type="button" className="btn fab secondary" onClick={() => setLayersOpen(true)}>
-            ☰
-          </button>
-          <button type="button" className="btn fab primary" onClick={() => void loadSignals(true)}>
-            {isRefreshing ? <span className="spinner" aria-label="Memuat" /> : "↻"}
-          </button>
+      <div className="mapViewport">
+        <div className="mapCanvas" ref={mapContainerRef} />
+        <div className="mapOverlay">
+          <div className="heatmap-top">
+            <button
+              type="button"
+              className="heatmap-debug-label"
+              onMouseDown={startDebugHold}
+              onMouseUp={clearDebugHold}
+              onMouseLeave={clearDebugHold}
+              onTouchStart={startDebugHold}
+              onTouchEnd={clearDebugHold}
+            >
+              Heatmap
+            </button>
+            <button type="button" className="btn chip" onClick={() => setRegionOpen(true)}>
+              Wilayah · {region.label.replace("Bandung ", "")}
+            </button>
+          </div>
+          <div className="heatmap-fabs">
+            <button type="button" className="btn fab secondary" onClick={() => setLayersOpen(true)}>
+              ☰
+            </button>
+            <button
+              type="button"
+              className="btn fab primary"
+              onClick={() => void loadSignals(true)}
+            >
+              {isRefreshing ? <span className="spinner" aria-label="Memuat" /> : "↻"}
+            </button>
+          </div>
+          {mapError && (
+            <div className="mapErrorBanner">
+              <div className="mapErrorMessage">{mapError}</div>
+              <div className="mapErrorActions">
+                <button type="button" className="btn ghost" onClick={handleMapRetry}>
+                  Retry map
+                </button>
+                <a className="btn secondary" href="/drive">
+                  Buka Drive
+                </a>
+                <a className="btn secondary" href="/wallet">
+                  Buka Dompet
+                </a>
+              </div>
+            </div>
+          )}
+          {debugOpen && (
+            <div className="mapDebugHud">
+              <div className="mapDebugTitle">Map Debug</div>
+              <div>Supported: {mapSupported === null ? "unknown" : mapSupported ? "yes" : "no"}</div>
+              <div>Container: {containerSize}</div>
+              <div>Canvas: {canvasFound ? "yes" : "no"}</div>
+              <div>Ready: {mapReady ? "yes" : "no"}</div>
+              <div>Error: {mapError ?? "-"}</div>
+              <div className="mapDebugActions">
+                <button type="button" className="btn ghost" onClick={handleMapRetry}>
+                  Retry map
+                </button>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={() => updateMapDiagnostics()}
+                >
+                  Refresh HUD
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       <Sheet open={layersOpen} onClose={() => setLayersOpen(false)} title="Layers & Sinyal">
         <div className="grid">
+          <div className="form-row">
+            <button type="button" className="btn ghost" onClick={() => setDebugOpen((prev) => !prev)}>
+              i
+            </button>
+            <div className="helper-text">
+              Debug map {debugOpen ? "aktif" : "nonaktif"}
+            </div>
+          </div>
           <div className="form-row">
             <button
               type="button"
@@ -941,14 +1073,16 @@ export function HeatmapClient() {
           ))}
         </div>
       </Sheet>
-      <Toast
-        open={Boolean(status)}
-        message={status?.message ?? ""}
-        variant={status?.variant}
-        actionLabel={status?.actionLabel}
-        onAction={status?.onAction}
-        onClose={() => setStatus(null)}
-      />
+      <div className="toastLayer">
+        <Toast
+          open={Boolean(status)}
+          message={status?.message ?? ""}
+          variant={status?.variant}
+          actionLabel={status?.actionLabel}
+          onAction={status?.onAction}
+          onClose={() => setStatus(null)}
+        />
+      </div>
     </div>
   );
 }
