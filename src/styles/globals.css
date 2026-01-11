@@ -23,7 +23,7 @@
   --lift-shadow: 0 10px 24px rgba(0, 0, 0, 0.1);
   --press-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   --topbar-h: 52px;
-  --bottomnav-h: 60px;
+  --bottomnav-h: 64px;
 }
 
 * {
@@ -381,41 +381,33 @@ button.danger {
 
 .heatmap-screen {
   position: relative;
-  width: 100vw;
-  margin: -12px calc(50% - 50vw);
-  height: calc(100dvh - var(--topbar-h) - var(--bottomnav-h));
-  min-height: 520px;
-  overflow: hidden;
+  min-height: calc(100dvh - var(--topbar-h) - var(--bottomnav-h));
+}
+
+.mapViewport {
+  position: fixed;
+  top: var(--topbar-h);
+  bottom: var(--bottomnav-h);
+  left: 0;
+  right: 0;
+  z-index: 0;
   background: #ffffff;
 }
 
-.heatmap-map {
+.mapCanvas {
   position: absolute;
   inset: 0;
+  z-index: 0;
 }
 
-.heatmap-overlay {
+.mapOverlay {
   position: absolute;
   inset: 0;
+  z-index: 5;
   pointer-events: none;
 }
 
-.heatmap-error {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  right: 12px;
-  z-index: 5;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid var(--border);
-  color: var(--danger);
-  padding: 10px 12px;
-  border-radius: 12px;
-  font-size: 0.85rem;
-  text-align: center;
-}
-
-.heatmap-overlay > * {
+.mapOverlay > * {
   pointer-events: auto;
 }
 
@@ -426,6 +418,8 @@ button.danger {
   right: 12px;
   display: flex;
   justify-content: flex-start;
+  gap: 8px;
+  align-items: center;
 }
 
 .heatmap-fabs {
@@ -436,6 +430,78 @@ button.danger {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.heatmap-debug-label {
+  border: none;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--muted);
+  font-size: 0.75rem;
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.mapErrorBanner {
+  position: absolute;
+  top: 56px;
+  left: 12px;
+  right: 12px;
+  z-index: 6;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--border);
+  color: var(--danger);
+  padding: 12px;
+  border-radius: 14px;
+  display: grid;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+
+.mapErrorMessage {
+  font-weight: 600;
+}
+
+.mapErrorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mapDebugHud {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 6;
+  background: rgba(17, 17, 17, 0.9);
+  color: #ffffff;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.mapDebugTitle {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.mapDebugActions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.toastLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.toastLayer .toast {
+  pointer-events: auto;
 }
 
 .sheet-backdrop,
@@ -631,6 +697,11 @@ button.danger {
 
 .page {
   transition: opacity var(--dur) var(--ease-out), transform var(--dur) var(--ease-out);
+}
+
+main.page,
+.page {
+  background: transparent !important;
 }
 
 .page.page-enter {
