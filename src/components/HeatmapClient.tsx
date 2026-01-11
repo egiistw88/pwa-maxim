@@ -7,12 +7,12 @@ import { nanoid } from "nanoid";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { cellToLatLng, latLngToCell } from "h3-js";
-import { db, type Settings, type Session, type Trip } from "../lib/db";
-import { type LatLon, type WeatherSummary } from "../lib/engine/features";
+import { db, type Settings, type Session, type Trip, type WalletTx } from "../lib/db";
+import { timeBucket, type LatLon, type WeatherSummary } from "../lib/engine/features";
 import { recommendTopCells, type Recommendation } from "../lib/engine/recommend";
 import { updateWeightsFromOutcome, type Weights } from "../lib/engine/scoring";
 import { haptic } from "../lib/haptics";
-import { binPointsToH3, h3CellsToGeoJSON } from "../lib/h3";
+import { binPointsToH3, h3CellsToPointGeoJSON } from "../lib/h3";
 import { getSettings, updateSettings } from "../lib/settings";
 import { attachToActiveSession, computeActiveMinutes } from "../lib/session";
 import type { GeoJsonFeatureCollection } from "../lib/geojsonTypes";
@@ -36,7 +36,12 @@ const tripSchema = z.object({
 
 const H3_RESOLUTION = 9;
 const CACHE_TTL = 6 * 60 * 60;
-type ToastState = { message: string; variant?: "success" | "error" };
+type ToastState = {
+  message: string;
+  variant?: "success" | "error";
+  actionLabel?: string;
+  onAction?: () => void;
+};
 
 const mapStyle: StyleSpecification = {
   version: 8,
@@ -94,18 +99,33 @@ export function HeatmapClient() {
   const [layersOpen, setLayersOpen] = useState(false);
   const [regionOpen, setRegionOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [mapInitKey, setMapInitKey] = useState(0);
 
   const { isOnline } = useNetworkStatus();
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const timerRef = useRef<number | null>(null);
+  const mapErrorRef = useRef(false);
 
   const region = regions[regionKey];
   const hapticsEnabled = settings?.hapticsEnabled ?? true;
 
-  function showStatus(message: string, variant?: ToastState["variant"]) {
-    setStatus({ message, variant });
+  function handleMapRetry() {
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
+    mapErrorRef.current = false;
+    setMapInitKey((prev) => prev + 1);
+  }
+
+  function showStatus(
+    message: string,
+    variant?: ToastState["variant"],
+    action?: Pick<ToastState, "actionLabel" | "onAction">
+  ) {
+    setStatus({ message, variant, ...action });
     if (!variant || !hapticsEnabled) {
       return;
     }
@@ -162,69 +182,105 @@ export function HeatmapClient() {
       return;
     }
 
-    const map = new maplibregl.Map({
-      container: mapContainerRef.current,
-      style: mapStyle,
-      center,
-      zoom: 12
-    });
-
-    map.addControl(new maplibregl.NavigationControl(), "top-right");
-
-    map.on("load", () => {
-      map.addSource("internal", {
-        type: "geojson",
-        data: internalGeoJson
-      });
-      map.addSource("poi", {
-        type: "geojson",
-        data: poiGeoJson
+    try {
+      const map = new maplibregl.Map({
+        container: mapContainerRef.current,
+        style: mapStyle,
+        center,
+        zoom: 12
       });
 
-      map.addLayer({
-        id: "internal-fill",
-        type: "fill",
-        source: "internal",
-        paint: {
-          "fill-color": [
-            "interpolate",
-            ["linear"],
-            ["get", "intensity"],
-            0,
-            "#bfdbfe",
-            1,
-            "#1d4ed8"
-          ],
-          "fill-opacity": 0.55
+      map.addControl(new maplibregl.NavigationControl(), "top-right");
+
+      map.on("error", (event) => {
+        if (mapErrorRef.current) {
+          return;
         }
+        mapErrorRef.current = true;
+        console.error("Map error", event.error);
+        showStatus("Map gagal dimuat.", "error", {
+          actionLabel: "Coba lagi",
+          onAction: () => handleMapRetry()
+        });
       });
 
-      map.addLayer({
-        id: "poi-fill",
-        type: "fill",
-        source: "poi",
-        paint: {
-          "fill-color": [
-            "interpolate",
-            ["linear"],
-            ["get", "intensity"],
-            0,
-            "#bbf7d0",
-            1,
-            "#16a34a"
-          ],
-          "fill-opacity": 0.45
-        }
+      map.on("load", () => {
+        mapErrorRef.current = false;
+        map.addSource("internal", {
+          type: "geojson",
+          data: internalGeoJson
+        });
+        map.addSource("poi", {
+          type: "geojson",
+          data: poiGeoJson
+        });
+
+        map.addLayer({
+          id: "internal-heat",
+          type: "heatmap",
+          source: "internal",
+          paint: {
+            "heatmap-weight": ["get", "intensity"],
+            "heatmap-radius": 32,
+            "heatmap-intensity": 1,
+            "heatmap-color": [
+              "interpolate",
+              ["linear"],
+              ["heatmap-density"],
+              0,
+              "rgba(191, 219, 254, 0)",
+              0.4,
+              "#93c5fd",
+              0.7,
+              "#3b82f6",
+              1,
+              "#1d4ed8"
+            ]
+          }
+        });
+
+        map.addLayer({
+          id: "poi-heat",
+          type: "heatmap",
+          source: "poi",
+          paint: {
+            "heatmap-weight": ["get", "intensity"],
+            "heatmap-radius": 26,
+            "heatmap-intensity": 0.8,
+            "heatmap-color": [
+              "interpolate",
+              ["linear"],
+              ["heatmap-density"],
+              0,
+              "rgba(187, 247, 208, 0)",
+              0.5,
+              "#86efac",
+              0.8,
+              "#22c55e",
+              1,
+              "#16a34a"
+            ]
+          }
+        });
+
+        console.log("map loaded", map.getStyle()?.sources);
       });
-    });
 
-    mapRef.current = map;
+      mapRef.current = map;
 
-    return () => {
-      map.remove();
+      return () => {
+        map.remove();
+        mapRef.current = null;
+      };
+    } catch (error) {
+      console.error("Map init error", error);
+      showStatus("Map gagal dimuat.", "error", {
+        actionLabel: "Coba lagi",
+        onAction: () => handleMapRetry()
+      });
       mapRef.current = null;
-    };
-  }, [center]);
+    }
+  }, [center, mapInitKey]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -256,15 +312,15 @@ export function HeatmapClient() {
       return;
     }
 
-    if (map.getLayer("internal-fill")) {
+    if (map.getLayer("internal-heat")) {
       map.setLayoutProperty(
-        "internal-fill",
+        "internal-heat",
         "visibility",
         internalEnabled ? "visible" : "none"
       );
     }
-    if (map.getLayer("poi-fill")) {
-      map.setLayoutProperty("poi-fill", "visibility", poiEnabled ? "visible" : "none");
+    if (map.getLayer("poi-heat")) {
+      map.setLayoutProperty("poi-heat", "visibility", poiEnabled ? "visible" : "none");
     }
   }, [internalEnabled, poiEnabled]);
 
@@ -286,15 +342,21 @@ export function HeatmapClient() {
     if (!internalEnabled) {
       return;
     }
+    const targetBucket = timeBucket(new Date());
     const points = trips
-      .filter((trip) => trip.startLat !== null && trip.startLon !== null)
+      .filter((trip) => {
+        if (trip.startLat === null || trip.startLon === null) {
+          return false;
+        }
+        return timeBucket(new Date(trip.startedAt)) === targetBucket;
+      })
       .map((trip) => ({
         lat: trip.startLat as number,
         lon: trip.startLon as number,
         value: Math.max(trip.earnings, 1)
       }));
     const cells = binPointsToH3(points, H3_RESOLUTION);
-    setInternalGeoJson(h3CellsToGeoJSON(cells));
+    setInternalGeoJson(h3CellsToPointGeoJSON(cells));
   }, [trips, internalEnabled]);
 
   useEffect(() => {
@@ -380,7 +442,7 @@ export function HeatmapClient() {
         poiResult.payload.points.map((point) => ({ lat: point.lat, lon: point.lon })),
         H3_RESOLUTION
       );
-      setPoiGeoJson(h3CellsToGeoJSON(poiCells));
+      setPoiGeoJson(h3CellsToPointGeoJSON(poiCells));
       return poiResult.meta;
     } catch (error) {
       showStatus(error instanceof Error ? error.message : "Gagal mengambil sinyal POI", "error");
@@ -680,7 +742,22 @@ export function HeatmapClient() {
         sessionId: draftTripStart.sessionId
       };
       const tripWithSession = await attachToActiveSession(trip);
-      await db.trips.add(tripWithSession);
+      await db.transaction("rw", db.trips, db.wallet_tx, async () => {
+        await db.trips.add(tripWithSession);
+        if (settings?.autoAddIncomeFromTrips ?? true) {
+          const walletTx: WalletTx = {
+            id: nanoid(),
+            createdAt: endedAt,
+            type: "income",
+            amount: earningsValue,
+            category: "Order",
+            note: "Order (Heatmap)",
+            sessionId: tripWithSession.sessionId
+          };
+          const txWithSession = await attachToActiveSession(walletTx);
+          await db.wallet_tx.add(txWithSession);
+        }
+      });
       const durationHours = Math.max(
         (new Date(endedAt).getTime() - new Date(draftTripStart.startedAt).getTime()) /
           3_600_000,
@@ -837,6 +914,8 @@ export function HeatmapClient() {
         open={Boolean(status)}
         message={status?.message ?? ""}
         variant={status?.variant}
+        actionLabel={status?.actionLabel}
+        onAction={status?.onAction}
         onClose={() => setStatus(null)}
       />
     </div>

@@ -8,6 +8,8 @@ type ToastProps = {
   onClose: () => void;
   durationMs?: number;
   variant?: "success" | "error";
+  actionLabel?: string;
+  onAction?: () => void;
 };
 
 export function Toast({
@@ -15,7 +17,9 @@ export function Toast({
   message,
   onClose,
   durationMs = 2200,
-  variant
+  variant,
+  actionLabel,
+  onAction
 }: ToastProps) {
   const [shouldRender, setShouldRender] = useState(open);
   const [isExiting, setIsExiting] = useState(false);
@@ -56,7 +60,19 @@ export function Toast({
       role="status"
       aria-live="polite"
     >
-      {message}
+      <span>{message}</span>
+      {actionLabel && onAction && (
+        <button
+          type="button"
+          className="toast-action"
+          onClick={() => {
+            onAction();
+            onClose();
+          }}
+        >
+          {actionLabel}
+        </button>
+      )}
     </div>
   );
 }
